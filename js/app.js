@@ -241,7 +241,9 @@
   function paintDocInfo() {
     $('ent-count').textContent = doc.entities.length;
     $('st-size').textContent = Object.keys(doc.layers).length + ' layers';
-    $('st-format').textContent = 'Binary DWG · ' + srcInfo.version;
+    $('st-format').textContent = (srcInfo.version && srcInfo.version !== srcInfo.format)
+      ? (srcInfo.format + ' · ' + srcInfo.version)
+      : srcInfo.format;
     $('doc-name').textContent = srcInfo.name;
     $('badge-fmt').textContent = srcInfo.format;
   }
@@ -567,7 +569,7 @@
 
     window.DWGLoader.toDxf(dwgBytes)
       .then(function (r) {
-        loadDocument(r.dxf, { format: 'DWG', version: r.version, name: 'MB-CH-A0102' });
+        loadDocument(r.dxf, { format: r.format, version: r.version, name: 'MB-CH-A0102' });
         setBusy(null);
       })
       .catch(function (err) {
