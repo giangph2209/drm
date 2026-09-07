@@ -321,7 +321,12 @@
           watermarkSub: fmtTime(now) + ' · ' + USER.email,
           wmOpacity: 0.14
         });
-        r.pdf.save(DOC.code + '_' + USER.email.split('@')[0] + '_' + r.traceId + '.pdf');
+        /* Tên file = tiêu đề đã bỏ dấu (đọc được) + mã bản vẽ + người tải + mã tra vết.
+           Vì bản mã hoá không ghi /Title (tránh chuỗi rác), thanh tiêu đề của trình đọc
+           sẽ lấy TÊN FILE để hiển thị -> đặt tên file đọc được là cách hiện tiêu đề sạch
+           trên mọi viewer. */
+        var safe = function (s) { return String(s).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim(); };
+        r.pdf.save(safe(r.title) + ' - ' + safe(DOC.code) + ' - ' + USER.email.split('@')[0] + ' - ' + r.traceId + '.pdf');
         $('modal').classList.remove('on');
         window.DRM.toast('Đã xuất PDF · ' + r.count + ' đối tượng · mã tra vết ' + r.traceId, 'ok');
         logViolation('export-pdf', r.traceId);

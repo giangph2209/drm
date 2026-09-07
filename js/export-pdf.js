@@ -114,16 +114,26 @@
     pdf.setFont('helvetica', 'normal'); pdf.setTextColor(120);
     pdf.text(paper.name + (landscape ? ' Landscape' : ' Portrait'), PW - M, PH - FOOT + 5, { align: 'right' });
 
-    /* --- metadata --- */
-    pdf.setProperties({
-      title: deaccent(o.title + ' [' + o.docCode + ']'),
-      subject: deaccent('Ban sao kiem soat cap cho ' + o.user + ' - ma tra vet ' + tid),
-      author: deaccent(o.company || 'He thong phan phoi ban ve'),
-      keywords: 'DRM,controlled-copy,' + tid,
-      creator: 'DRM Drawing Portal'
-    });
+    /* --- metadata ---
+       Khi bật mã hoá (o.protect), jsPDF BẮT BUỘC mã hoá mọi chuỗi trong Info
+       dictionary, kể cả /Title. Trình đọc nào không giải mã metadata (nhiều viewer
+       nhẹ trên Linux/di động) sẽ in nguyên chuỗi ciphertext lên thanh tiêu đề ->
+       trông như bị "lỗi font / encode". Tiêu đề, tác giả... không phải bí mật (đã có
+       ở footer + watermark + tên file) nên khi mã hoá ta KHÔNG ghi các chuỗi này để
+       tránh hiện chuỗi rác; giá trị DRM (cấm in/copy, watermark, tra vết) vẫn nguyên.
+       Khi không mã hoá thì ghi đầy đủ metadata như bình thường. */
+    var titlePlain = deaccent(o.title);
+    if (!o.protect) {
+      pdf.setProperties({
+        title: titlePlain + ' [' + o.docCode + ']',
+        subject: deaccent('Ban sao kiem soat cap cho ' + o.user + ' - ma tra vet ' + tid),
+        author: deaccent(o.company || 'He thong phan phoi ban ve'),
+        keywords: 'DRM,controlled-copy,' + tid,
+        creator: 'DRM Drawing Portal'
+      });
+    }
 
-    return { pdf: pdf, traceId: tid, count: ents.length };
+    return { pdf: pdf, traceId: tid, count: ents.length, title: titlePlain };
   }
 
   /* ---------- vẽ 1 entity vào PDF ---------- */
