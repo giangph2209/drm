@@ -43,6 +43,9 @@
      Vừa khoá VIEW (cổng che app) vừa khoá TẢI (chốt trong hàm Xuất PDF ở mục 7):
      mất quyền -> không xem, không tải. */
   var clipboardOK = false;
+  /* true khi DevTools đang mở -> ẩn bản vẽ ở tầng canvas. Nhớ trạng thái để nếu bản
+     vẽ tải xong lúc DevTools đang mở thì vẫn hiện màn ẩn ngay. */
+  var devtoolsOpen = false;
 
   /* ================= 1. Watermark (định danh người xem — cố định) ================= */
   var wm = {
@@ -105,6 +108,8 @@
     viewer.applyLayout(currentLayout);
     viewer.fit();
     paintDocInfo();
+    /* Nếu DevTools đã mở sẵn lúc bản vẽ vừa tải: ẩn ngay, đừng để loé ra 1 khung hình. */
+    if (devtoolsOpen) viewer.setSuppressed(true);
   }
 
   /* -- danh sách layout -- */
@@ -263,7 +268,12 @@
       'Cấp cho: ' + USER.name + ' · ' + USER.email,
       'Phiên xem: ' + sessionId + ' · ' + fmtTime(startedAt)
     ],
-    onViolation: logViolation
+    onViolation: logViolation,
+    /* DevTools mở -> ẩn bản vẽ (canvas không vẽ entity nào); đóng -> hiện lại. */
+    onDevtools: function (open) {
+      devtoolsOpen = open;
+      if (viewer) viewer.setSuppressed(open);
+    }
   });
 
   function logViolation(type, detail) {

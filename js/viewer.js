@@ -16,6 +16,7 @@
     this.opts = opts || {};
     this.scale = 1; this.ox = 0; this.oy = 0;   // world -> screen
     this.hidden = {};                            // { layerName: true } = đang tắt
+    this.suppressed = false;                     // true = ẩn bản vẽ (vd: DevTools đang mở)
     this.watermark = this.opts.watermark || null;
     this.dpr = Math.min(global.devicePixelRatio || 1, 2);
     this._bind();
@@ -89,6 +90,11 @@
     ctx.fillStyle = this.opts.bg || '#1e2532';
     ctx.fillRect(0, 0, this.W, this.H);
 
+    /* Bị ẩn (vd: DevTools mở): KHÔNG vẽ entity/watermark -> canvas không chứa pixel
+       bản vẽ để soi qua DevTools. Khác với lớp blur CSS (xoá class là hết), ở đây dữ
+       liệu ảnh thật sự không được sinh ra. */
+    if (this.suppressed) { this._suppressedNotice(ctx); return; }
+
     if (this.opts.grid !== false) this._grid(ctx);
 
     var self = this;
@@ -107,6 +113,27 @@
 
     if (this.watermark) this.drawWatermark(ctx, this.W, this.H, this.watermark);
     this._scalebar(ctx);
+  };
+
+  /* Bật/tắt chế độ ẩn bản vẽ. Vẽ lại ngay để canvas trống (khi bật) hoặc hiện lại
+     (khi tắt). Mọi thao tác pan/zoom sau đó cũng chỉ vẽ màn trống khi còn bật. */
+  Viewer.prototype.setSuppressed = function (on) {
+    on = !!on;
+    if (this.suppressed === on) return;
+    this.suppressed = on;
+    this.render();
+  };
+
+  Viewer.prototype._suppressedNotice = function (ctx) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(240,165,51,.9)';
+    ctx.font = '600 15px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Bản vẽ đã được ẩn', this.W / 2, this.H / 2 - 11);
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Phát hiện DevTools đang mở — đóng lại để xem tiếp.', this.W / 2, this.H / 2 + 12);
+    ctx.restore();
   };
 
   Viewer.prototype._dash = function (ctx, e, ly) {

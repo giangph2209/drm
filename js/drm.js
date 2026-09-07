@@ -25,7 +25,8 @@
     wipeOnFocus: true,          // phá clipboard mỗi khi trang lấy lại focus (bắt Snipping Tool)
     wipeLines: [],              // các dòng định danh in lên ảnh cảnh báo
     detectDevtools: true,
-    onViolation: null           // function(type, detail) — nơi cắm API ghi log audit
+    onViolation: null,          // function(type, detail) — nơi cắm API ghi log audit
+    onDevtools: null            // function(open) — báo mở/đóng DevTools để ẩn/hiện bản vẽ
   };
 
   var doc = global.document;
@@ -262,6 +263,8 @@
     var open = wGap > 165 || hGap > 165;
     if (open !== dtOpen) {
       dtOpen = open;
+      /* Báo cho app ẩn/hiện bản vẽ ở tầng canvas (không chỉ blur lớp phủ). */
+      try { if (CFG.onDevtools) CFG.onDevtools(open); } catch (e) { }
       if (open) {
         shield(true, 'Phát hiện công cụ phát triển (DevTools) đang mở. Đóng DevTools để xem lại bản vẽ.');
         violate('devtools-open', 'gap ' + wGap + 'x' + hGap);
