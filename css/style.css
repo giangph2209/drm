@@ -236,10 +236,45 @@ button { cursor: pointer; }
 
 .drm-flash .app { filter: blur(22px) contrast(.4); transition: filter .05s; }
 
+/* ---------- CỔNG QUYỀN CLIPBOARD ----------
+   Lớp chống chụp màn hình hoạt động bằng cách GHI ĐÈ clipboard. Không có quyền
+   clipboard = không có lớp bảo vệ -> chặn luôn việc mở bản vẽ. Overlay này che
+   toàn bộ ứng dụng cho tới khi trình duyệt xác nhận ghi được clipboard. */
+#drm-gate {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center;
+  background: rgba(15, 19, 28, .97);
+  backdrop-filter: blur(8px);
+  color: #eef2f8;
+}
+.drm-gate-box {
+  max-width: 440px; width: calc(100% - 40px);
+  text-align: center; padding: 32px 30px;
+  background: #141a26; border: 1px solid #232b3d; border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.drm-gate-box svg { color: #f0a533; }
+.drm-gate-box h2 { margin: 14px 0 8px; font-size: 19px; }
+.drm-gate-box p { margin: 0 0 8px; font-size: 13px; color: #b6c2d4; line-height: 1.65; }
+.drm-gate-box .why { font-size: 12px; color: #8b97ad; margin: 14px 0 20px; }
+.drm-gate-box button {
+  width: 100%; padding: 12px 16px; font-size: 14px; font-weight: 600;
+  color: #fff; background: var(--acc, #2a7fe0); border: 0; border-radius: 9px;
+  cursor: pointer;
+}
+.drm-gate-box button:disabled { opacity: .6; cursor: default; }
+.drm-gate-box .gate-err {
+  margin-top: 16px; font-size: 12.5px; line-height: 1.6;
+  color: #ffb4b4; background: rgba(209, 52, 56, .1);
+  border: 1px solid rgba(209, 52, 56, .35); border-radius: 8px;
+  padding: 10px 12px; text-align: left;
+}
+.drm-gate-box .gate-err[hidden] { display: none; }
+
 /* ---------- CHẶN IN: nếu người dùng vẫn mở được hộp thoại In ---------- */
 @media print {
   html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
-  .app, #drm-toast, #drm-shield, .modal-bg { display: none !important; }
+  .app, #drm-toast, #drm-shield, #drm-gate, .modal-bg { display: none !important; }
   body::after {
     content: "TAI LIEU KHONG DUOC PHEP IN\A\A Ban ve nay duoc phan phoi qua he thong kiem soat. Chuc nang in truc tiep tu trinh duyet da bi vo hieu hoa. De co ban in hop le, dung nut \201CXuat PDF co watermark\201D trong trinh xem \2014 ban PDF do gan dinh danh nguoi tai va ma tra vet.\A\A Moi hanh vi in trai phep deu duoc ghi nhat ky.";
     white-space: pre-wrap;

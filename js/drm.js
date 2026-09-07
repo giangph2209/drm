@@ -305,5 +305,5 @@
     return { toast: toast, shield: shield, config: CFG };
   }
 
-  global.DRM = { init: init, toast: toast };
+  global.DRM = { init: init, toast: toast, shield: shield };
 })(window);
