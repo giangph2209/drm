@@ -276,35 +276,67 @@
       applySuppress();
     },
     /* Mỗi lần drm.js phá clipboard: ok=false nghĩa là mất quyền ghi clipboard ngay
-       lúc này -> lớp chống chụp đã chết -> ẩn bản vẽ, không tin cờ cũ nữa. */
+       lúc này -> lớp chống chụp đã chết -> hạ trạng thái xuống "không có quyền". */
     onWipe: function (ok) {
-      setClipboardDown(!ok, ok ? '' : 'wipe-failed');
+      /* KHÔNG ẩn bản vẽ chỉ vì một lần ghi clipboard hỏng: ghi clipboard đòi hỏi
+         document đang focus, nên lúc focus in/out nó có thể hỏng tạm thời dù vẫn còn
+         quyền. Xác minh lại quyền THỰC bằng Permissions API rồi mới quyết định. */
+      if (!ok) reverifyClipboard('wipe-failed');
     }
   });
 
-  /* ---- Nguồn sự thật duy nhất cho "lớp bảo vệ còn sống hay không" ----
-     Không tin trạng thái đã cấp lúc trước; hễ phát hiện mất quyền clipboard (qua
-     onWipe thất bại HOẶC permission bị thu hồi) là ẩn bản vẽ + khoá tải ngay. */
-  var protectionDown = false;
+  /* ---- Quyền Clipboard = nguồn sự thật cho HIỂN THỊ + TẢI ----
+     clipboardOK phản ánh quyền THỰC TẾ của trình duyệt lúc này (đọc qua Permissions
+     API + cập nhật theo onchange, và bị hạ xuống nếu một lần phá clipboard thất bại).
+     Không có quyền -> ẩn bản vẽ (canvas trống) + hiện cổng hướng dẫn + khoá tải.
+     Có quyền trở lại -> tự hiển thị, không cần reload. */
+  var drawingLoaded = false;
+  var clipEvaluated = false;
+
   function applySuppress() {
-    if (viewer) {
-      viewer.setSuppressed(devtoolsOpen || protectionDown,
-        protectionDown && !devtoolsOpen
-          ? 'Mất quyền Clipboard — lớp chống chụp màn hình đã ngừng. Cấp lại quyền để xem tiếp.'
-          : undefined);
-    }
+    if (!viewer) return;
+    viewer.setSuppressed(devtoolsOpen || !clipboardOK,
+      (!clipboardOK && !devtoolsOpen)
+        ? 'Chưa có quyền Clipboard — vào cài đặt quyền của trình duyệt cho trang này để xem.'
+        : undefined);
   }
-  function setClipboardDown(down, reason) {
-    down = !!down;
-    if (down === protectionDown) return;
-    protectionDown = down;
-    clipboardOK = !down;                 // khoá luôn nút Xuất PDF
-    applySuppress();
-    if (down) {
-      window.DRM.toast('Mất quyền Clipboard — lớp chống chụp màn hình đã ngừng, bản vẽ tạm ẩn.', 'block');
-      logViolation('clipboard-protection-down', reason || '');
-    } else {
-      window.DRM.toast('Đã khôi phục quyền Clipboard.', 'ok');
+
+  function applyClipboard(granted, reason) {
+    granted = !!granted;
+    var changed = granted !== clipboardOK;
+    clipboardOK = granted;               // khoá/mở nút Xuất PDF (mục 7)
+    applySuppress();                     // ẩn/hiện canvas
+    showGate(!granted);                  // hiện/ẩn cổng hướng dẫn
+    if (granted && !drawingLoaded) { drawingLoaded = true; loadEmbeddedDrawing(); }
+    if (changed && clipEvaluated) {
+      if (granted) {
+        logViolation('clipboard-granted', reason || '');
+        window.DRM.toast('Đã có quyền Clipboard — hiển thị bản vẽ.', 'ok');
+      } else {
+        logViolation('clipboard-blocked', reason || '');
+        window.DRM.toast('Không có quyền Clipboard — bản vẽ tạm ẩn, không thể tải.', 'block');
+      }
+    }
+    clipEvaluated = true;
+  }
+
+  /* Một lần phá clipboard thất bại CÓ THỂ chỉ do trang tạm mất focus (write clipboard
+     đòi hỏi document đang focus) chứ không phải mất quyền -> đừng ẩn bản vẽ vội.
+     - Có Permissions API: hỏi lại trạng thái quyền (không phụ thuộc focus); chỉ chặn
+       khi đúng là không 'granted'. Nếu vẫn 'granted' -> lờ đi (chỉ là nhiễu do focus).
+     - Không có Permissions API: chỉ chặn nếu trang đang focus (loại lỗi "not focused").
+     Việc thu hồi quyền thật trên Chromium vẫn được bắt độc lập qua onchange ở mục 9. */
+  function reverifyClipboard(reason) {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
+        if (st.state !== 'granted') setGateMsg(CLIP_MSG.blocked);
+        applyClipboard(st.state === 'granted', 'reverify:' + st.state);
+      }).catch(function () {
+        if (document.hasFocus()) { setGateMsg(CLIP_MSG.blocked); applyClipboard(false, reason); }
+      });
+    } else if (document.hasFocus()) {
+      setGateMsg(CLIP_MSG.blocked);
+      applyClipboard(false, reason);
     }
   }
 
@@ -398,24 +430,23 @@
   $('ov-user').textContent = USER.email;
   $('ov-session').textContent = sessionId;
 
-  /* ================= 9. Cổng quyền Clipboard ================= */
+  /* ================= 9. Kiểm tra quyền Clipboard thực tế ================= */
   /*
-   * Lớp chống chụp màn hình (drm.js) chống rò rỉ bằng cách GHI ĐÈ clipboard ngay
-   * sau khi ảnh được chụp. Nếu trình duyệt KHÔNG cho ghi clipboard (không chạy
-   * https, người dùng chặn quyền, hoặc trình duyệt không hỗ trợ Clipboard API) thì
-   * lớp bảo vệ đó vô hiệu -> theo chính sách, KHÔNG mở bản vẽ để tránh phát tài liệu
-   * kiểm soát ra một môi trường không tự bảo vệ được.
-   *
-   * Vì trình duyệt chỉ cho ghi clipboard KHI có thao tác người dùng (user gesture),
-   * ta phải hỏi qua một nút bấm chứ không thể tự xin quyền lúc tải trang.
+   * Chính sách: lớp chống chụp màn hình (drm.js) bảo vệ tài liệu bằng cách GHI ĐÈ
+   * clipboard. Vì vậy khi TRUY CẬP, đọc quyền clipboard THỰC TẾ của trình duyệt:
+   *   - Có quyền           -> hiển thị bản vẽ, cho tải.
+   *   - Chưa/không có quyền -> tạm ẩn bản vẽ + khoá tải + hiện hướng dẫn để người dùng
+   *     TỰ vào cài đặt quyền của trình duyệt bật lên. Quyền đổi (onchange) -> tự hiển
+   *     thị lại, không cần reload.
    */
-  var CLIP_ERR = {
-    insecure: 'Trang không chạy trong ngữ cảnh bảo mật (HTTPS). Clipboard API bị trình duyệt khoá, ' +
-      'nên lớp chống chụp màn hình không hoạt động. Hãy mở tài liệu qua đường dẫn https.',
-    unsupported: 'Trình duyệt này không hỗ trợ ghi ảnh vào clipboard (Clipboard API). ' +
-      'Vui lòng dùng Chrome/Edge bản mới để xem tài liệu kiểm soát.',
-    denied: 'Trình duyệt đã CHẶN quyền clipboard cho trang này. Không có quyền này thì không thể ' +
-      'bảo vệ tài liệu khỏi ảnh chụp màn hình. Hãy cấp lại quyền Clipboard trong cài đặt trang rồi thử lại.'
+  var CLIP_MSG = {
+    checking: 'Đang kiểm tra quyền Clipboard của trình duyệt…',
+    blocked: 'Trình duyệt đang chặn/chưa cấp quyền Clipboard cho trang này. Mở cài đặt quyền của trang ' +
+      '(bấm biểu tượng 🔒/⚙ cạnh thanh địa chỉ → Cài đặt trang → mục Clipboard/Bảng tạm → chọn Cho phép) — ' +
+      'trang sẽ tự hiển thị lại. Hoặc bấm “Kiểm tra lại”.',
+    insecure: 'Trang không chạy qua HTTPS nên Clipboard API bị trình duyệt khoá — không thể bảo vệ tài liệu. Hãy mở qua đường https.',
+    unsupported: 'Trình duyệt không hỗ trợ Clipboard API cần thiết. Hãy dùng Chrome/Edge bản mới.',
+    needProbe: 'Trình duyệt này không cho đọc trạng thái quyền. Bấm “Kiểm tra & mở bản vẽ” để xác nhận quyền Clipboard.'
   };
 
   /* 1x1 png để thử đúng đường ghi ẢNH mà lớp bảo vệ sẽ dùng (không chỉ ghi text) */
@@ -427,7 +458,8 @@
     });
   }
 
-  /* Thử ghi thật vào clipboard — đây là năng lực mà drm.js cần. Thành công = mở được. */
+  /* Thử GHI THẬT vào clipboard — dùng cho nút bấm (cần user gesture) và cho trình
+     duyệt không đọc được trạng thái quyền. Reject bằng mã: insecure/unsupported/denied. */
   function probeClipboard() {
     if (!window.isSecureContext) return Promise.reject('insecure');
     if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) {
@@ -439,81 +471,91 @@
         'text/plain': new Blob(['[Kiem tra quyen clipboard - he thong phan phoi ban ve]'], { type: 'text/plain' })
       })]);
     }).catch(function (e) {
-      /* NotAllowedError -> người dùng/chính sách chặn; còn lại coi như không hỗ trợ */
       throw (e && e.name === 'NotAllowedError') ? 'denied' : (typeof e === 'string' ? e : 'denied');
     });
   }
 
-  /* Overlay chặn toàn bộ ứng dụng cho tới khi xác nhận ghi được clipboard. */
-  function clipboardGate() {
-    return new Promise(function (resolve) {
-      var g = document.createElement('div');
-      g.id = 'drm-gate';
-      g.innerHTML =
-        '<div class="drm-gate-box">' +
-        '<svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.6">' +
-        '<path d="M12 2 4 5.5v6c0 5 3.4 9.2 8 10.5 4.6-1.3 8-5.5 8-10.5v-6L12 2Z"/>' +
-        '<path d="m9.5 12 1.9 1.9L15 10"/></svg>' +
-        '<h2>Tài liệu kiểm soát</h2>' +
-        '<p>Bản vẽ <b>' + DOC.code + '</b> chỉ mở khi trình duyệt cho phép quyền <b>Clipboard</b>.</p>' +
-        '<p class="why">Lớp chống chụp màn hình bảo vệ tài liệu bằng cách can thiệp vào clipboard. ' +
-        'Không có quyền này, tài liệu không thể tự bảo vệ — nên sẽ không được mở.</p>' +
-        '<button id="gate-allow" type="button">Cho phép Clipboard &amp; mở bản vẽ</button>' +
-        '<div class="gate-err" id="gate-err" hidden></div>' +
-        '</div>';
-      document.body.appendChild(g);
+  /* ---- Cổng hướng dẫn (dựng 1 lần, ẩn/hiện theo quyền) ---- */
+  var gateEl = null;
+  function ensureGate() {
+    if (gateEl) return gateEl;
+    gateEl = document.createElement('div');
+    gateEl.id = 'drm-gate';
+    gateEl.innerHTML =
+      '<div class="drm-gate-box">' +
+      '<svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.6">' +
+      '<path d="M12 2 4 5.5v6c0 5 3.4 9.2 8 10.5 4.6-1.3 8-5.5 8-10.5v-6L12 2Z"/>' +
+      '<path d="m9.5 12 1.9 1.9L15 10"/></svg>' +
+      '<h2>Cần quyền Clipboard</h2>' +
+      '<p>Bản vẽ <b>' + DOC.code + '</b> chỉ hiển thị và cho tải khi trình duyệt cho phép quyền ' +
+      '<b>Clipboard</b> — vì lớp chống chụp màn hình bảo vệ tài liệu ngay trên clipboard.</p>' +
+      '<div class="gate-err" id="gate-msg"></div>' +
+      '<button id="gate-btn" type="button">Kiểm tra lại</button>' +
+      '</div>';
+    document.body.appendChild(gateEl);
+    gateEl.querySelector('#gate-btn').addEventListener('click', tryProbe);
+    return gateEl;
+  }
+  function showGate(show) { ensureGate().style.display = show ? 'grid' : 'none'; }
+  function setGateMsg(t) { ensureGate().querySelector('#gate-msg').textContent = t; }
+  function setGateBtn(text, disabled) {
+    var b = ensureGate().querySelector('#gate-btn');
+    b.textContent = text; b.disabled = !!disabled;
+  }
 
-      var btn = g.querySelector('#gate-allow');
-      var err = g.querySelector('#gate-err');
-
-      function tryGrant() {
-        btn.disabled = true;
-        btn.textContent = 'Đang kiểm tra quyền…';
-        err.hidden = true;
-        probeClipboard().then(function () {
-          clipboardOK = true;
-          logViolation('clipboard-granted', '');
-          g.parentNode && g.parentNode.removeChild(g);
-          watchRevoke();
-          resolve();
-        }).catch(function (code) {
-          err.textContent = CLIP_ERR[code] || CLIP_ERR.denied;
-          err.hidden = false;
-          btn.disabled = false;
-          btn.textContent = 'Thử lại';
-          logViolation('clipboard-blocked', code);
-        });
-      }
-      btn.addEventListener('click', tryGrant);
-
-      /* Nếu quyền đã bị chặn sẵn từ trước, báo ngay để người dùng biết phải mở lại. */
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
-          if (st.state === 'denied') { err.textContent = CLIP_ERR.denied; err.hidden = false; }
-        }).catch(function () { });
-      }
+  /* Nút bấm: thử ghi thật (có user gesture). Thành công -> mở; thất bại -> giữ chặn. */
+  function tryProbe() {
+    setGateBtn('Đang kiểm tra…', true);
+    probeClipboard().then(function () {
+      applyClipboard(true, 'probe');
+    }).catch(function (code) {
+      setGateMsg(CLIP_MSG[code] || CLIP_MSG.blocked);
+      setGateBtn('Kiểm tra lại', false);
+      applyClipboard(false, code);
     });
   }
 
-  /* Sau khi đã cấp quyền: nếu người dùng thu hồi giữa chừng thì ẩn bản vẽ ngay.
-     Đây là đường PROACTIVE (Chromium): bắt được ngay khi đổi quyền, trước cả khi
-     người dùng kịp chụp. Trình duyệt không hỗ trợ query sẽ dựa vào onWipe thất bại. */
-  function watchRevoke() {
-    if (!navigator.permissions || !navigator.permissions.query) return;
-    navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
-      st.onchange = function () {
-        setClipboardDown(st.state === 'denied', 'permission-revoked');
-      };
-    }).catch(function () { });
+  /* Đọc quyền THỰC TẾ khi truy cập, rồi theo dõi onchange để tự mở/khoá. */
+  function initClipboard() {
+    ensureGate(); showGate(true); setGateMsg(CLIP_MSG.checking); setGateBtn('Kiểm tra lại', false);
+
+    if (!window.isSecureContext) {
+      setGateMsg(CLIP_MSG.insecure);
+      applyClipboard(false, 'insecure');
+      return;
+    }
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
+        applyState(st.state);
+        st.onchange = function () { applyState(st.state); };   // người dùng đổi trong cài đặt -> tự cập nhật
+      }).catch(function () {
+        /* Trình duyệt không đọc được trạng thái quyền -> phải bấm probe (có gesture) */
+        setGateMsg(CLIP_MSG.needProbe); setGateBtn('Kiểm tra & mở bản vẽ', false);
+        applyClipboard(false, 'no-perm-api');
+      });
+    } else {
+      setGateMsg(CLIP_MSG.needProbe); setGateBtn('Kiểm tra & mở bản vẽ', false);
+      applyClipboard(false, 'no-perm-api');
+    }
+
+    function applyState(state) {
+      if (state === 'granted') {
+        applyClipboard(true, 'state:granted');
+      } else {
+        setGateMsg(CLIP_MSG.blocked); setGateBtn('Kiểm tra lại', false);
+        applyClipboard(false, 'state:' + state);
+      }
+    }
   }
 
-  /* ================= 10. Nạp bản vẽ DWG mặc định (sau khi qua cổng) ================= */
+  /* ================= 10. Nạp bản vẽ DWG (chỉ khi đã có quyền) ================= */
   if (!window.EMBEDDED_DWG) {
     fatal('Không tìm thấy bản vẽ nhúng (data/drawing.js).<br>Chạy: node tools/gen-dxf.js && node tools/make-dwg.js');
     return;
   }
 
-  clipboardGate().then(function () {
+  /* Gọi bởi applyClipboard() đúng một lần khi quyền được cấp lần đầu. */
+  function loadEmbeddedDrawing() {
     setBusy('Đang mở bản vẽ DWG…');
     var dwgBytes = b64ToBuffer(window.EMBEDDED_DWG);
     /* Xoá tham chiếu để không copy được file gốc ra từ console */
@@ -528,7 +570,9 @@
         setBusy(null);
         fatal('Không mở được bản vẽ DWG.<br><br>' + err.message);
       });
-  });
+  }
+
+  initClipboard();
 
   function fatal(html) {
     document.body.innerHTML =

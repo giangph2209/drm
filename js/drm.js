@@ -193,6 +193,10 @@
 
   var selfCopy = false;   // cho phép execCommand('copy') của chính mình đi qua
   function wipeClipboard() {
+    /* Ghi clipboard chỉ được phép khi document đang focus. Nếu trang KHÔNG focus (vd
+       nhịp trễ của burst chạy sau khi người dùng đã rời tab) thì bỏ qua — đừng báo
+       thất bại, vì đó là lỗi "not focused" chứ không phải mất quyền. */
+    if (doc.hasFocus && !doc.hasFocus()) return;
     var note = '[' + (CFG.wipeNote || 'Anh chup bi vo hieu hoa boi he thong phan phoi ban ve') + ']';
     /* Ghi đồng thời ảnh + text: mọi định dạng cũ trong clipboard bị thay sạch. */
     if (navigator.clipboard && navigator.clipboard.write && global.ClipboardItem) {
