@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Đo sự kiện bàn phím — trình duyệt thật sự nhận được gì?</title>
+<title>Keyboard event probe — what does the browser actually receive?</title>
 <style>
   :root{--bg:#0b0e14;--panel:#121722;--panel2:#171d2b;--line:#232b3d;--txt:#dbe3f0;
         --dim:#8b97ad;--faint:#5f6b80;--acc:#4a9eff;--ok:#35c48a;--warn:#f0a533;--bad:#e5484d;
@@ -56,49 +56,49 @@
 <body>
 <div class="wrap">
 
-  <h1>Trình duyệt thật sự nhận được gì khi bấm phím?</h1>
-  <div class="sub">Trang đo độc lập — không liên quan tới bản vẽ. Bấm các phím bên dưới và xem kết quả.</div>
+  <h1>What does the browser actually receive when you press a key?</h1>
+  <div class="sub">A standalone probe page — unrelated to the drawing. Press the keys below and watch the results.</div>
 
   <div class="grid">
 
     <div class="card">
-      <h2>Bấm lần lượt các phím sau</h2>
+      <h2>Press each of these keys in turn</h2>
       <table>
-        <thead><tr><th>Phím</th><th>Trình duyệt nhận được</th><th>Chặn được?</th></tr></thead>
+        <thead><tr><th>Key</th><th>Browser received</th><th>Blockable?</th></tr></thead>
         <tbody id="tests"></tbody>
       </table>
       <div class="body" style="border-top:1px solid var(--line)">
-        <button id="btn-clip">Đọc clipboard hiện tại</button>
-        <div class="clip" id="clip">— chưa đọc —</div>
+        <button id="btn-clip">Read current clipboard</button>
+        <div class="clip" id="clip">— not read yet —</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Nhật ký sự kiện thô</h2>
+      <h2>Raw event log</h2>
       <div class="body" style="padding:10px">
-        <div id="log"><div class="empty">Bấm một phím bất kỳ…</div></div>
+        <div id="log"><div class="empty">Press any key…</div></div>
       </div>
     </div>
 
   </div>
 
   <div class="note v">
-    <b>Cách đọc kết quả.</b> Với <kbd>Ctrl</kbd>+<kbd>P</kbd> và <kbd>F12</kbd>, cột giữa sẽ hiện
-    <b>keydown</b> — trang web nhận được sự kiện <i>trước khi</i> trình duyệt kịp làm gì, nên
-    <code>preventDefault()</code> chặn được, hộp thoại In không mở ra.
-    Với <kbd>PrtSc</kbd>, cột giữa sẽ hiện <b>chỉ keyup</b> hoặc <b>không nhận được gì</b> — và dù
-    có nhận được thì ảnh cũng đã nằm trong clipboard từ trước đó rồi. Đó là toàn bộ khác biệt.
+    <b>How to read the results.</b> With <kbd>Ctrl</kbd>+<kbd>P</kbd> and <kbd>F12</kbd>, the middle
+    column shows <b>keydown</b> — the page receives the event <i>before</i> the browser can act on it, so
+    <code>preventDefault()</code> can block it and the Print dialog never opens.
+    With <kbd>PrtSc</kbd>, the middle column shows <b>keyup only</b> or <b>nothing at all</b> — and even
+    when it is received, the screenshot is already in the clipboard by then. That is the whole difference.
   </div>
 
   <div class="note">
-    <b>Kiểm chứng cuối cùng.</b>
+    <b>The final proof.</b>
     <ol style="margin-top:8px">
-      <li>Bấm <kbd>PrtSc</kbd> trên trang này, rồi bấm nút <b>"Đọc clipboard hiện tại"</b>.
-          Nếu ra dòng cảnh báo thì phần ghi đè clipboard có tác dụng — nhưng ảnh vẫn đã được chụp.</li>
-      <li>Bấm <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, quét một vùng, rồi mở Paint dán thử.
-          Ảnh sẽ ra bình thường — trang web không hề biết chuyện đó đã xảy ra.</li>
-      <li>So sánh với <kbd>Ctrl</kbd>+<kbd>P</kbd>: hộp thoại In <b>không</b> mở ra. Đó là phím mà
-          trang web thực sự chặn được.</li>
+      <li>Press <kbd>PrtSc</kbd> on this page, then click the <b>"Read current clipboard"</b> button.
+          If the warning line appears, the clipboard overwrite worked — but the screenshot was still taken.</li>
+      <li>Press <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, drag over a region, then open Paint and paste.
+          The image comes out fine — the page has no idea it happened.</li>
+      <li>Compare with <kbd>Ctrl</kbd>+<kbd>P</kbd>: the Print dialog does <b>not</b> open. That is a key the
+          page really can block.</li>
     </ol>
   </div>
 
@@ -120,7 +120,7 @@
     state[t.id] = { down: false, up: false };
     var tr = document.createElement('tr');
     tr.innerHTML = '<td><kbd>' + t.label + '</kbd></td>' +
-      '<td id="r-' + t.id + '"><span class="pill wait">chưa bấm</span></td>' +
+      '<td id="r-' + t.id + '"><span class="pill wait">not pressed</span></td>' +
       '<td id="b-' + t.id + '"><span class="pill wait">—</span></td>';
     tbody.appendChild(tr);
   });
@@ -135,9 +135,9 @@
     if (!got.length) return;
     cell.innerHTML = '<span class="pill ' + (s.down ? 'yes' : 'no') + '">' + got.join(' + ') + '</span>';
     if (s.down) {
-      bcell.innerHTML = '<span class="pill yes">' + (t.snap ? 'phím chặn được — nhưng ảnh đã chụp' : 'CÓ') + '</span>';
+      bcell.innerHTML = '<span class="pill yes">' + (t.snap ? 'key is blockable — but the image was captured' : 'YES') + '</span>';
     } else {
-      bcell.innerHTML = '<span class="pill no">KHÔNG — chỉ có keyup</span>';
+      bcell.innerHTML = '<span class="pill no">NO — keyup only</span>';
     }
   }
 
@@ -177,7 +177,7 @@
     if (hit && hit.block && isDown) {
       e.preventDefault();
       e.stopPropagation();
-      extra = '   << đã preventDefault()';
+      extra = '   << preventDefault() called';
       cls = 'blocked';
     }
     push(describe(e) + extra, cls);
@@ -191,9 +191,9 @@
   document.addEventListener('keydown', function (e) { handle(e, true); }, true);
   document.addEventListener('keyup', function (e) { handle(e, false); }, true);
 
-  var NOTE = '[Anh chup man hinh da bi ghi de luc ' + new Date().toLocaleTimeString('vi-VN') + ']';
+  var NOTE = '[Screenshot was overwritten at ' + new Date().toLocaleTimeString('en-US') + ']';
   function wipeClipboard() {
-    NOTE = '[Anh chup man hinh da bi ghi de luc ' + new Date().toLocaleTimeString('vi-VN') + ']';
+    NOTE = '[Screenshot was overwritten at ' + new Date().toLocaleTimeString('en-US') + ']';
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(NOTE).catch(function () { });
@@ -204,17 +204,17 @@
   document.getElementById('btn-clip').addEventListener('click', function () {
     var box = document.getElementById('clip');
     if (!navigator.clipboard || !navigator.clipboard.readText) {
-      box.textContent = 'Trình duyệt không cho đọc clipboard ở ngữ cảnh này.';
+      box.textContent = 'The browser does not allow reading the clipboard in this context.';
       return;
     }
     navigator.clipboard.readText().then(function (t) {
       box.textContent = t
-        ? 'Nội dung text: "' + t + '"'
-        : 'Clipboard không chứa TEXT — nhiều khả năng đang chứa ẢNH (trình duyệt không đọc được ảnh từ clipboard bằng readText).';
+        ? 'Text content: "' + t + '"'
+        : 'The clipboard contains no TEXT — it most likely holds an IMAGE (the browser cannot read images from the clipboard via readText).';
     }).catch(function (err) {
-      box.textContent = 'Không đọc được: ' + err.name + ' — ' +
-        'thường do trang chưa được cấp quyền clipboard hoặc mở bằng file://. ' +
-        'Hãy dán trực tiếp vào Paint để kiểm tra.';
+      box.textContent = 'Could not read: ' + err.name + ' — ' +
+        'usually because the page has not been granted clipboard permission or was opened via file://. ' +
+        'Paste directly into Paint to verify.';
     });
   });
 })();

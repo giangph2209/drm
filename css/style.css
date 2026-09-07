@@ -1,5 +1,5 @@
 /* ==========================================================================
-   DRM Drawing Portal — demo giao diện phân phối bản vẽ
+   DRM Drawing Portal — drawing distribution interface demo
    ========================================================================== */
 :root {
   --bg: #eef1f6;
@@ -16,7 +16,7 @@
   --warn: #c07a12;
   --danger: #d13438;
 
-  /* vùng vẽ vẫn nền tối — nét bản vẽ là màu sáng trên nền tối (như AutoCAD) */
+  /* drawing area stays dark — drawing strokes are light on a dark background (like AutoCAD) */
   --cad-bg: #1e2532;
   --cad-txt: #e6ecf6;
   --cad-txt-dim: #b6c2d4;
@@ -39,7 +39,7 @@ html, body {
   overflow: hidden;
 }
 
-/* chặn bôi đen khi DRM bật */
+/* block text selection when DRM is on */
 .drm-noselect, .drm-noselect * {
   -webkit-user-select: none;
   user-select: none;
@@ -50,7 +50,7 @@ html, body {
 button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
 button { cursor: pointer; }
 
-/* ---------- khung tổng ---------- */
+/* ---------- overall layout ---------- */
 .app {
   display: grid;
   grid-template-rows: 52px 1fr 26px;
@@ -59,7 +59,7 @@ button { cursor: pointer; }
   height: 100vh;
 }
 
-/* ---------- thanh trên ---------- */
+/* ---------- top bar ---------- */
 .topbar {
   grid-area: top;
   box-shadow: 0 1px 3px rgba(20, 30, 50, .06);
@@ -117,7 +117,7 @@ button { cursor: pointer; }
 .user-meta b { display: block; font-size: 12px; font-weight: 600; line-height: 1.25; }
 .user-meta span { font-size: 10.5px; color: var(--txt-faint); }
 
-/* ---------- vùng vẽ ---------- */
+/* ---------- drawing area ---------- */
 .main { grid-area: main; position: relative; overflow: hidden; background: var(--cad-bg); }
 #cad { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 
@@ -149,7 +149,7 @@ button { cursor: pointer; }
 .toolbar .btn:hover { background: rgba(255, 255, 255, .12); border-color: transparent; }
 .toolbar .div { width: 1px; background: var(--cad-line); margin: 4px 3px; }
 
-/* ---------- thanh trạng thái ---------- */
+/* ---------- status bar ---------- */
 .status {
   grid-area: status;
   display: flex; align-items: center; gap: 16px;
@@ -162,7 +162,7 @@ button { cursor: pointer; }
 .status b { color: var(--txt-dim); font-weight: 600; }
 #log-count { color: var(--warn); font-family: var(--mono); }
 
-/* ---------- modal xuất PDF ---------- */
+/* ---------- PDF export modal ---------- */
 .modal-bg {
   position: fixed; inset: 0; z-index: 60;
   background: rgba(24, 34, 52, .42);
@@ -192,7 +192,7 @@ button { cursor: pointer; }
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 18px; background: var(--panel-2); border-top: 1px solid var(--line-soft);
 }
-/* chính sách áp dụng cố định cho mọi bản xuất — không phải tuỳ chọn */
+/* policy applied unconditionally to every export — not an option */
 .policy {
   padding: 10px 12px; margin-bottom: 4px;
   background: rgba(18, 153, 106, .09);
@@ -220,7 +220,7 @@ button { cursor: pointer; }
 #drm-toast.block { background: #fdeaea; color: #a3232a; border-color: rgba(209, 52, 56, .4); }
 #drm-toast.ok { background: #e4f6ee; color: #10684a; border-color: rgba(18, 153, 106, .4); }
 
-/* ---------- màn che / nhoè ---------- */
+/* ---------- shield / blur ---------- */
 #drm-shield {
   position: fixed; inset: 0; z-index: 80;
   display: none; place-items: center;
@@ -236,10 +236,11 @@ button { cursor: pointer; }
 
 .drm-flash .app { filter: blur(22px) contrast(.4); transition: filter .05s; }
 
-/* ---------- CỔNG QUYỀN CLIPBOARD ----------
-   Lớp chống chụp màn hình hoạt động bằng cách GHI ĐÈ clipboard. Không có quyền
-   clipboard = không có lớp bảo vệ -> chặn luôn việc mở bản vẽ. Overlay này che
-   toàn bộ ứng dụng cho tới khi trình duyệt xác nhận ghi được clipboard. */
+/* ---------- CLIPBOARD PERMISSION GATE ----------
+   The anti-screenshot layer works by OVERWRITING the clipboard. No clipboard
+   permission = no protection layer -> opening the drawing is blocked outright.
+   This overlay covers the entire app until the browser confirms it can write to
+   the clipboard. */
 #drm-gate {
   position: fixed; inset: 0; z-index: 100;
   display: grid; place-items: center;
@@ -271,12 +272,12 @@ button { cursor: pointer; }
 }
 .drm-gate-box .gate-err[hidden] { display: none; }
 
-/* ---------- CHẶN IN: nếu người dùng vẫn mở được hộp thoại In ---------- */
+/* ---------- BLOCK PRINTING: in case the user still manages to open the Print dialog ---------- */
 @media print {
   html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
   .app, #drm-toast, #drm-shield, #drm-gate, .modal-bg { display: none !important; }
   body::after {
-    content: "TAI LIEU KHONG DUOC PHEP IN\A\A Ban ve nay duoc phan phoi qua he thong kiem soat. Chuc nang in truc tiep tu trinh duyet da bi vo hieu hoa. De co ban in hop le, dung nut \201CXuat PDF co watermark\201D trong trinh xem \2014 ban PDF do gan dinh danh nguoi tai va ma tra vet.\A\A Moi hanh vi in trai phep deu duoc ghi nhat ky.";
+    content: "THIS DOCUMENT MAY NOT BE PRINTED\A\A This drawing is distributed through a controlled system. Printing directly from the browser has been disabled. To obtain a valid printout, use the \201CExport watermarked PDF\201D button in the viewer \2014 that PDF embeds the downloader identity and a trace code.\A\A Every unauthorized printing attempt is logged.";
     white-space: pre-wrap;
     display: block;
     padding: 60px 70px;
@@ -288,7 +289,7 @@ button { cursor: pointer; }
   }
 }
 
-/* ---------- mở file DWG / DXF ---------- */
+/* ---------- open DWG / DXF file ---------- */
 .doc-chip .fmt {
   font-family: var(--mono); font-size: 10px; font-weight: 700;
   letter-spacing: .5px;
@@ -304,10 +305,10 @@ button { cursor: pointer; }
   backdrop-filter: blur(2px);
   font-size: 13px; color: var(--cad-txt-dim);
 }
-/* display:grid ở trên đè mất [hidden] mặc định của trình duyệt -> phải trả lại */
+/* display:grid above overrides the browser's default [hidden] -> must restore it */
 #busy[hidden] { display: none; }
 
-/* vùng thả file — chỉ hiện khi đang kéo file vào */
+/* file drop zone — only shown while a file is being dragged in */
 .dropzone {
   position: absolute; inset: 14px; z-index: 6;
   display: none; place-items: center;

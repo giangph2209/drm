@@ -1,11 +1,12 @@
 /*
- * export-pdf.js — Xuất bản vẽ đang xem ra PDF VECTOR kèm watermark.
+ * export-pdf.js — Export the currently viewed drawing to a VECTOR PDF with a watermark.
  *
- * Vì sao xuất PDF chứ không cho tải DWG/DXF:
- *   DWG/DXF là định dạng dữ liệu mở cho phần mềm CAD. Watermark đóng vào DWG chỉ là
- *   một entity nằm trên một layer -> người nhận tắt layer / xoá entity / copy sang file
- *   mới là mất sạch. PDF thì watermark nằm trong content stream của trang, không tách rời
- *   được bằng thao tác thông thường, và còn gắn được cờ cấm in/cấm copy ở cấp tài liệu.
+ * Why export PDF instead of allowing DWG/DXF download:
+ *   DWG/DXF are open data formats for CAD software. A watermark baked into a DWG is just
+ *   an entity on a layer -> the recipient turns off the layer / deletes the entity / copies
+ *   it into a new file and it is gone. In a PDF the watermark lives inside the page content
+ *   stream, cannot be separated out by ordinary operations, and the document can additionally
+ *   carry no-print / no-copy flags at the document level.
  */
 (function (global) {
   'use strict';
@@ -16,14 +17,14 @@
     a2: { w: 594, h: 420, name: 'A2' }
   };
 
-  /* jsPDF font chuẩn không có glyph tiếng Việt -> bỏ dấu cho chuỗi ghi vào PDF */
+  /* The standard jsPDF fonts have no Vietnamese glyphs -> strip accents from strings written to the PDF */
   function deaccent(s) {
     return String(s == null ? '' : s)
       .normalize('NFD').replace(/[̀-ͯ]/g, '')
       .replace(/đ/g, 'd').replace(/Đ/g, 'D');
   }
 
-  /* Mã tra vết: nhúng vào watermark + metadata để truy nguồn bản rò rỉ */
+  /* Trace code: embedded into the watermark + metadata to trace the source of a leaked copy */
   function traceId(seed) {
     var h = 0x811c9dc5;
     var s = seed + '|' + Date.now();
@@ -33,7 +34,7 @@
 
   function run(doc, viewer, o) {
     var jsPDFCtor = (global.jspdf && global.jspdf.jsPDF) || global.jsPDF;
-    if (!jsPDFCtor) throw new Error('Chua tai duoc thu vien jsPDF.');
+    if (!jsPDFCtor) throw new Error('Failed to load the jsPDF library.');
 
     var paper = PAPERS[o.paper] || PAPERS.a3;
     var landscape = paper.w >= paper.h;
@@ -45,13 +46,14 @@
       format: [Math.max(paper.w, paper.h), Math.min(paper.w, paper.h)],
       compress: true
     };
-    /* Cờ quyền ở cấp tài liệu: KHÔNG cấp quyền "print"/"copy" -> Acrobat & đa số reader
-       sẽ khoá nút In và khoá copy text. Đây là lớp răn đe, không phải mã hoá nội dung. */
+    /* Document-level permission flags: do NOT grant "print"/"copy" -> Acrobat and most readers
+       will disable the Print button and block text copying. This is a deterrent layer, not
+       content encryption. */
     if (o.protect) {
       pdfOpts.encryption = {
         userPassword: '',
         ownerPassword: tid + '-' + Math.random().toString(36).slice(2),
-        userPermissions: []          // rỗng = không cho in, không cho sửa, không cho copy
+        userPermissions: []          // empty = no printing, no editing, no copying
       };
     }
     var pdf = new jsPDFCtor(pdfOpts);
@@ -61,7 +63,7 @@
     var M = 10, FOOT = 16;
     var area = { x: M, y: M, w: PW - M * 2, h: PH - M * 2 - FOOT };
 
-    /* --- entity đang hiển thị --- */
+    /* --- currently visible entities --- */
     var ents = doc.entities.filter(function (e) {
       if (viewer.hidden[e.layer]) return false;
       var ly = doc.layers[e.layer] || {};
@@ -74,10 +76,10 @@
     var X = function (x) { return offX + (x - b.minX) * s; };
     var Y = function (y) { return offY + (b.maxY - y) * s; };
 
-    /* --- nền + khung trang --- */
+    /* --- page background + frame --- */
     pdf.setFillColor(255, 255, 255); pdf.rect(0, 0, PW, PH, 'F');
 
-    /* --- thân bản vẽ --- */
+    /* --- drawing body --- */
     pdf.setLineCap('round'); pdf.setLineJoin('round');
     var LW = { TUONG: 0.45, KHUNG_TEN: 0.32, CUA_SO: 0.22, DEFAULT: 0.18 };
     var lastKey = null;
@@ -100,34 +102,34 @@
       drawEntity(pdf, e, X, Y, s);
     });
 
-    /* --- watermark: lát chéo phủ toàn trang, nằm TRONG content stream --- */
+    /* --- watermark: diagonal tiling covering the whole page, INSIDE the content stream --- */
     drawWatermark(pdf, PW, PH, o, tid);
 
-    /* --- dải chân trang: ai tải, lúc nào, mã tra vết --- */
+    /* --- footer strip: who downloaded, when, trace code --- */
     pdf.setDrawColor(150); pdf.setLineWidth(0.25);
     pdf.line(M, PH - FOOT, PW - M, PH - FOOT);
     pdf.setTextColor(70); pdf.setFontSize(8); pdf.setFont('helvetica', 'normal');
-    pdf.text(deaccent(o.title + '  |  Ma ban ve: ' + o.docCode + '  |  Layout: ' + o.layoutName), M, PH - FOOT + 5);
-    pdf.text(deaccent('Nguoi tai: ' + o.user + '   -   ' + o.time + '   -   Ma tra vet: ' + tid), M, PH - FOOT + 9.5);
+    pdf.text(deaccent(o.title + '  |  Drawing code: ' + o.docCode + '  |  Layout: ' + o.layoutName), M, PH - FOOT + 5);
+    pdf.text(deaccent('Downloaded by: ' + o.user + '   -   ' + o.time + '   -   Trace code: ' + tid), M, PH - FOOT + 9.5);
     pdf.setFont('helvetica', 'bold'); pdf.setTextColor(150, 30, 30);
-    pdf.text(deaccent('TAI LIEU KIEM SOAT - CAM IN / CAM SAO CHEP / CAM PHAT TAN'), M, PH - FOOT + 14);
+    pdf.text(deaccent('CONTROLLED DOCUMENT - NO PRINTING / NO COPYING / NO REDISTRIBUTION'), M, PH - FOOT + 14);
     pdf.setFont('helvetica', 'normal'); pdf.setTextColor(120);
     pdf.text(paper.name + (landscape ? ' Landscape' : ' Portrait'), PW - M, PH - FOOT + 5, { align: 'right' });
 
     /* --- metadata ---
-       Khi bật mã hoá (o.protect), jsPDF BẮT BUỘC mã hoá mọi chuỗi trong Info
-       dictionary, kể cả /Title. Trình đọc nào không giải mã metadata (nhiều viewer
-       nhẹ trên Linux/di động) sẽ in nguyên chuỗi ciphertext lên thanh tiêu đề ->
-       trông như bị "lỗi font / encode". Tiêu đề, tác giả... không phải bí mật (đã có
-       ở footer + watermark + tên file) nên khi mã hoá ta KHÔNG ghi các chuỗi này để
-       tránh hiện chuỗi rác; giá trị DRM (cấm in/copy, watermark, tra vết) vẫn nguyên.
-       Khi không mã hoá thì ghi đầy đủ metadata như bình thường. */
+       When encryption is enabled (o.protect), jsPDF is FORCED to encrypt every string in the
+       Info dictionary, including /Title. Any reader that does not decrypt metadata (many
+       lightweight viewers on Linux/mobile) will print the raw ciphertext into the title bar ->
+       it looks like a "font / encoding error". The title, author, etc. are not secret (they
+       already appear in the footer + watermark + file name), so when encrypting we do NOT write
+       these strings, avoiding garbage text; the DRM value (no print/copy, watermark, tracing)
+       stays intact. When not encrypting, we write the full metadata as usual. */
     var titlePlain = deaccent(o.title);
     if (!o.protect) {
       pdf.setProperties({
         title: titlePlain + ' [' + o.docCode + ']',
-        subject: deaccent('Ban sao kiem soat cap cho ' + o.user + ' - ma tra vet ' + tid),
-        author: deaccent(o.company || 'He thong phan phoi ban ve'),
+        subject: deaccent('Controlled copy issued to ' + o.user + ' - trace code ' + tid),
+        author: deaccent(o.company || 'Drawing distribution system'),
         keywords: 'DRM,controlled-copy,' + tid,
         creator: 'DRM Drawing Portal'
       });
@@ -136,7 +138,7 @@
     return { pdf: pdf, traceId: tid, count: ents.length, title: titlePlain };
   }
 
-  /* ---------- vẽ 1 entity vào PDF ---------- */
+  /* ---------- draw one entity into the PDF ---------- */
   function drawEntity(pdf, e, X, Y, s) {
     switch (e.type) {
       case 'LINE':
@@ -227,7 +229,7 @@
 
     for (var y = -diag / 2; y < diag; y += stepY) {
       for (var x = -diag / 2; x < diag; x += stepX) {
-        /* xoay quanh tâm trang: jsPDF quay quanh chính điểm text */
+        /* rotate around the page center: jsPDF rotates around the text point itself */
         var p = rot(x - PW / 4, y - PH / 4, 30);
         var px = p.x + PW / 2, py = p.y + PH / 2;
         if (px < -tw || px > PW + tw || py < -20 || py > PH + 20) continue;
@@ -245,13 +247,13 @@
     return { x: x * c - y * s, y: x * s + y * c };
   }
 
-  /* ---------- tiện ích ---------- */
+  /* ---------- utilities ---------- */
   function hexToRgb(hex, forceDark) {
     var h = (hex || '#000').replace('#', '');
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
     var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
     if (forceDark) return [0, 0, 0];
-    /* nền PDF trắng: màu quá sáng (trắng/vàng) sẽ mất nét -> ép tối lại */
+    /* white PDF background: colors that are too light (white/yellow) vanish -> force them darker */
     var lum = 0.299 * r + 0.587 * g + 0.114 * b;
     if (lum > 190) { r = Math.round(r * 0.35); g = Math.round(g * 0.35); b = Math.round(b * 0.35); }
     return [r, g, b];

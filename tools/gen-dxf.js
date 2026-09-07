@@ -1,9 +1,9 @@
 /*
- * gen-dxf.js — Sinh file bản vẽ kỹ thuật mẫu (DXF R12 / AC1009).
- * Chạy: node tools/gen-dxf.js
- * Xuất ra:
- *   sample/MB-CH-A0102.dxf   -> file DXF mở được bằng AutoCAD / BricsCAD / LibreCAD
- *   data/drawing.js          -> cùng nội dung, nhúng thẳng vào web (không cần upload/fetch)
+ * gen-dxf.js — Generate a sample engineering drawing file (DXF R12 / AC1009).
+ * Run: node tools/gen-dxf.js
+ * Outputs:
+ *   sample/MB-CH-A0102.dxf   -> DXF file openable in AutoCAD / BricsCAD / LibreCAD
+ *   data/drawing.js          -> same content, embedded directly into the web app (no upload/fetch needed)
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,12 +27,12 @@ function arc(layer, cx, cy, r, a1, a2) {
     P(40, F(r)) + P(50, F(a1)) + P(51, F(a2)));
 }
 /*
- * Chữ. Bản phát hành cuối cùng là DWG, mà đường chuyển DXF -> DWG của LibreDWG
- * làm MẤT group 72 (căn lề ngang) và ghi đè điểm căn lề 11/21 thành 0,0.
- * Nên không dùng group 72/73 nữa: tự tính sẵn toạ độ căn giữa / căn phải ở đây
- * rồi xuất ra chữ căn trái thuần. Nhờ vậy DXF và DWG hiển thị giống hệt nhau.
+ * Text. The final release format is DWG, and LibreDWG's DXF -> DWG conversion path
+ * LOSES group 72 (horizontal alignment) and overwrites the alignment point 11/21 to 0,0.
+ * So we no longer use groups 72/73: we precompute the center / right alignment coordinates
+ * here and emit plain left-aligned text. This makes the DXF and DWG render identically.
  */
-const CHAR_W = 0.55;   // bề rộng ký tự ước lượng, theo chiều cao chữ
+const CHAR_W = 0.55;   // estimated character width, relative to text height
 function text(layer, x, y, h, s, opts) {
   opts = opts || {};
   const rot = opts.rot || 0, halign = opts.halign || 0, valign = opts.valign || 0;
@@ -54,7 +54,7 @@ function rect(layer, x1, y1, x2, y2) {
   line(layer, x1, y1, x2, y1); line(layer, x2, y1, x2, y2);
   line(layer, x2, y2, x1, y2); line(layer, x1, y2, x1, y1);
 }
-/* tường 2 nét: trục (x1,y1)->(x2,y2), dày t */
+/* two-line wall: axis (x1,y1)->(x2,y2), thickness t */
 function wall(x1, y1, x2, y2, t) {
   const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy);
   const nx = -dy / L * t / 2, ny = dx / L * t / 2;
@@ -67,7 +67,7 @@ function cap(x1, y1, x2, y2, t) {
   line('TUONG', x1 + nx, y1 + ny, x1 - nx, y1 - ny);
   line('TUONG', x2 + nx, y2 + ny, x2 - nx, y2 - ny);
 }
-/* cửa đi trên tường ngang */
+/* door in a horizontal wall */
 function doorH(xc, y, w, t, up) {
   const s = up ? 1 : -1;
   line('TUONG', xc - w / 2, y - t / 2, xc - w / 2, y + t / 2);
@@ -75,7 +75,7 @@ function doorH(xc, y, w, t, up) {
   line('CUA_SO', xc - w / 2, y, xc - w / 2, y + s * w);
   arc('CUA_SO', xc - w / 2, y, w, up ? 0 : -90, up ? 90 : 0);
 }
-/* cửa đi trên tường đứng */
+/* door in a vertical wall */
 function doorV(x, yc, w, t, right) {
   const s = right ? 1 : -1;
   line('TUONG', x - t / 2, yc - w / 2, x + t / 2, yc - w / 2);
@@ -133,11 +133,11 @@ function hatchRect(layer, x1, y1, x2, y2, step) {
   }
 }
 
-/* ================= MẶT BẰNG CĂN HỘ ================= */
+/* ================= APARTMENT FLOOR PLAN ================= */
 const T = 220, Ti = 110, W = 12000, H = 8000;
-const xm = 6000;      // tường ngăn đứng, chia trái / phải
-const ym = 4200;      // tường ngăn ngang nửa PHẢI  (bếp  | ngủ 02)
-const ymL = 5350;     // tường ngăn ngang nửa TRÁI  (khách | ngủ 01)
+const xm = 6000;      // vertical partition wall, splitting left / right
+const ym = 4200;      // horizontal partition wall, RIGHT half  (kitchen | bedroom 02)
+const ymL = 5350;     // horizontal partition wall, LEFT half   (living | bedroom 01)
 
 wall(0, 0, W, 0, T);
 wall(0, H, W, H, T);
@@ -149,20 +149,20 @@ wall(xm, 0, xm, H, Ti);
 wall(xm, ym, W, ym, Ti);
 wall(0, ymL, xm, ymL, Ti);
 
-doorH(2200, 0, 1000, T, true);          // cửa chính -> phòng khách
+doorH(2200, 0, 1000, T, true);          // main door -> living room
 winH(4600, 0, 1800, T);
 winH(8800, 0, 1600, T);
 winH(3000, H, 1800, T);
 winH(9200, H, 1600, T);
-winV(0, 6600, 1500, T);                 // cửa sổ phòng ngủ 01
-doorH(4200, ymL, 900, Ti, true);        // khách -> ngủ 01 (tránh giường & tủ)
-doorV(xm, 2000, 900, Ti, true);         // khách -> bếp
-doorV(xm, 5000, 900, Ti, true);         // khách -> ngủ 02
+winV(0, 6600, 1500, T);                 // bedroom 01 window
+doorH(4200, ymL, 900, Ti, true);        // living -> bedroom 01 (clears bed & wardrobe)
+doorV(xm, 2000, 900, Ti, true);         // living -> kitchen
+doorV(xm, 5000, 900, Ti, true);         // living -> bedroom 02
 
 hatchRect('HATCH', xm + Ti / 2 + 60, T / 2 + 60, W - T / 2 - 60, ym - Ti / 2 - 60, 320);
 
-/* nội thất */
-rect('THIET_BI', 700, 1250, 3100, 2100);   /* sofa - nang len de khong de len cung quet cua chinh */
+/* interior furniture */
+rect('THIET_BI', 700, 1250, 3100, 2100);   /* sofa - raised so it does not overlap the main door swing */
 rect('THIET_BI', 700, 1250, 1000, 2100);
 line('THIET_BI', 1900, 1250, 1900, 2100);
 rect('THIET_BI', 1250, 2300, 2550, 3050);
@@ -189,18 +189,18 @@ line('THIET_BI', 7400, 7150, 9000, 7150);
 rect('THIET_BI', 10200, 5200, 11500, 5800);
 circle('THIET_BI', 10850, 6250, 320);
 
-/* nhãn phòng */
-text('VAN_BAN', 2900, 4000, 320, 'PHONG KHACH', { halign: 1 });
+/* room labels */
+text('VAN_BAN', 2900, 4000, 320, 'LIVING ROOM', { halign: 1 });
 text('VAN_BAN', 2900, 3600, 200, '29.2 m2', { halign: 1 });
-text('VAN_BAN', 2400, 6300, 320, 'PHONG NGU 01', { halign: 1 });
+text('VAN_BAN', 2400, 6300, 320, 'BEDROOM 01', { halign: 1 });
 text('VAN_BAN', 2400, 5900, 200, '13.6 m2', { halign: 1 });
-text('VAN_BAN', 8900, 2000, 320, 'BEP + AN', { halign: 1 });
+text('VAN_BAN', 8900, 2000, 320, 'KITCHEN + DINING', { halign: 1 });
 text('VAN_BAN', 8900, 1600, 200, '22.4 m2', { halign: 1 });
-text('VAN_BAN', 9400, 6600, 320, 'PHONG NGU 02', { halign: 1 });
+text('VAN_BAN', 9400, 6600, 320, 'BEDROOM 02', { halign: 1 });
 text('VAN_BAN', 9400, 6200, 200, '20.1 m2', { halign: 1 });
-text('VAN_BAN', 2200, -700, 170, 'CUA CHINH 1000x2200', { halign: 1 });
+text('VAN_BAN', 2200, -700, 170, 'MAIN DOOR 1000x2200', { halign: 1 });
 
-/* trục */
+/* grid axes */
 axisV(0, -1200, H + 1200, 'A');
 axisV(xm, -1200, H + 1200, 'B');
 axisV(W, -1200, H + 1200, 'C');
@@ -208,8 +208,8 @@ axisH(0, -1200, W + 1200, '1');
 axisH(ym, -1200, W + 1200, '2');
 axisH(H, -1200, W + 1200, '3');
 
-/* kích thước — chuỗi ngang đặt dưới, chuỗi đứng đặt bên PHẢI
-   (bên trái dành cho ghi chú + hoa gió, tránh đè lên nhau) */
+/* dimensions — horizontal strings placed below, vertical strings on the RIGHT
+   (the left side is reserved for notes + north arrow, to avoid overlap) */
 dimH(0, xm, -2100, '6000');
 dimH(xm, W, -2100, '6000');
 dimH(0, W, -3000, '12000');
@@ -217,22 +217,22 @@ dimV(0, ym, W + 1500, '4200');
 dimV(ym, H, W + 1500, '3800');
 dimV(0, H, W + 2400, '8000');
 
-/* ghi chú — nằm ngoài vùng bóng trục (x <= -2400) */
-text('VAN_BAN', -5800, H - 200, 220, 'GHI CHU:');
-text('VAN_BAN', -5800, H - 700, 180, '1. Kich thuoc tinh bang mm.');
-text('VAN_BAN', -5800, H - 1100, 180, '2. Tuong bao 220, tuong ngan 110.');
-text('VAN_BAN', -5800, H - 1500, 180, '3. Cao do san hoan thien +0.000.');
-text('VAN_BAN', -5800, H - 1900, 180, '4. Kiem tra hien truong truoc thi cong.');
+/* notes — placed outside the axis extension zone (x <= -2400) */
+text('VAN_BAN', -5800, H - 200, 220, 'NOTES:');
+text('VAN_BAN', -5800, H - 700, 180, '1. Dimensions are in mm.');
+text('VAN_BAN', -5800, H - 1100, 180, '2. Exterior walls 220, partition walls 110.');
+text('VAN_BAN', -5800, H - 1500, 180, '3. Finished floor level +0.000.');
+text('VAN_BAN', -5800, H - 1900, 180, '4. Verify on site before construction.');
 
-/* hướng Bắc */
+/* north arrow */
 circle('VAN_BAN', -4200, 1600, 700);
 solid('VAN_BAN', [[-4200, 2400], [-4450, 900], [-4200, 1200], [-4200, 1200]]);
 solid('VAN_BAN', [[-4200, 2400], [-3950, 900], [-4200, 1200], [-4200, 1200]]);
 text('VAN_BAN', -4200, 2500, 200, 'N', { halign: 1 });
 
-/* ================= KHUNG TÊN ================= */
-/* Tờ A3 ngang: 26600 x 18600 đơn vị vẽ (~ tỷ lệ 1.43, xấp xỉ A3 1.414).
-   Dải khung tên nằm dưới cùng bên phải, thấp hơn chuỗi kích thước ngang (y >= -3200). */
+/* ================= TITLE BLOCK ================= */
+/* A3 landscape sheet: 26600 x 18600 drawing units (~ ratio 1.43, close to A3's 1.414).
+   The title block strip sits at the bottom right, below the horizontal dimension strings (y >= -3200). */
 const PX1 = -6200, PY1 = -7000, PX2 = 20400, PY2 = 11600;
 rect('KHUNG_TEN', PX1, PY1, PX2, PY2);
 rect('KHUNG_TEN', PX1 + 300, PY1 + 300, PX2 - 300, PY2 - 300);
@@ -240,18 +240,18 @@ const bx = PX2 - 300, by = PY1 + 300, bw = 7600, bh = 3000;
 rect('KHUNG_TEN', bx - bw, by, bx, by + bh);
 [600, 1100, 1700, 2300].forEach(function (dy) { line('KHUNG_TEN', bx - bw, by + dy, bx, by + dy); });
 line('KHUNG_TEN', bx - bw + 3200, by, bx - bw + 3200, by + 1700);
-text('KHUNG_TEN', bx - bw + 200, by + 2550, 300, 'CONG TY CP XAY DUNG DEMO');
-text('KHUNG_TEN', bx - bw + 200, by + 1900, 200, 'DU AN: CHUNG CU SUNRISE TOWER - BLOCK A');
-text('KHUNG_TEN', bx - bw + 200, by + 1300, 220, 'MAT BANG CAN HO A-01.02');
-text('KHUNG_TEN', bx - bw + 200, by + 800, 180, 'TY LE: 1/100');
-text('KHUNG_TEN', bx - bw + 200, by + 350, 180, 'NGAY: 04/09/2026');
-text('KHUNG_TEN', bx - bw + 3400, by + 1300, 180, 'SO HIEU BAN VE:');
+text('KHUNG_TEN', bx - bw + 200, by + 2550, 300, 'DEMO CONSTRUCTION JSC');
+text('KHUNG_TEN', bx - bw + 200, by + 1900, 200, 'PROJECT: SUNRISE TOWER APARTMENTS - BLOCK A');
+text('KHUNG_TEN', bx - bw + 200, by + 1300, 220, 'APARTMENT A-01.02 FLOOR PLAN');
+text('KHUNG_TEN', bx - bw + 200, by + 800, 180, 'SCALE: 1/100');
+text('KHUNG_TEN', bx - bw + 200, by + 350, 180, 'DATE: 04/09/2026');
+text('KHUNG_TEN', bx - bw + 3400, by + 1300, 180, 'DRAWING NO.:');
 text('KHUNG_TEN', bx - bw + 3400, by + 800, 300, 'KT-02-A0102');
-text('KHUNG_TEN', bx - bw + 3400, by + 350, 180, 'GIAI DOAN: THIET KE KY THUAT');
-text('KHUNG_TEN', PX1 + 600, PY2 - 1000, 420, 'MAT BANG BO TRI NOI THAT - CAN HO A-01.02');
-text('KHUNG_TEN', PX1 + 600, PY2 - 1600, 220, 'TAI LIEU NOI BO - KHONG PHO BIEN RA NGOAI');
+text('KHUNG_TEN', bx - bw + 3400, by + 350, 180, 'STAGE: TECHNICAL DESIGN');
+text('KHUNG_TEN', PX1 + 600, PY2 - 1000, 420, 'INTERIOR LAYOUT PLAN - APARTMENT A-01.02');
+text('KHUNG_TEN', PX1 + 600, PY2 - 1600, 220, 'INTERNAL DOCUMENT - NOT FOR EXTERNAL DISTRIBUTION');
 
-/* ================= xuất file ================= */
+/* ================= file output ================= */
 const LTYPES = [
   { n: 'CONTINUOUS', d: 'Solid line', pat: [] },
   { n: 'DASHED', d: '__ __ __ __', pat: [400, -200] },
@@ -296,8 +296,8 @@ out += P(0, 'ENDSEC');
 out += P(0, 'SECTION') + P(2, 'ENTITIES') + ents.join('') + P(0, 'ENDSEC');
 out += P(0, 'EOF');
 
-/* DXF R12 trung gian. Bản phát hành là DWG — chạy tiếp `node tools/make-dwg.js`. */
+/* Intermediate DXF R12. The release format is DWG — run `node tools/make-dwg.js` next. */
 fs.writeFileSync(path.join(ROOT, 'sample', '_build.dxf'), out, 'utf8');
 
 console.log('OK  entities=' + ents.length + '  dxf=' + out.length + ' bytes -> sample/_build.dxf');
-console.log('    buoc tiep theo: node tools/make-dwg.js');
+console.log('    next step: node tools/make-dwg.js');

@@ -1,12 +1,12 @@
 /*
- * viewer.js — Trình xem bản vẽ 2D trên <canvas>. CHỈ ĐỌC.
- * Không có API sửa/xoá entity: dữ liệu bản vẽ được đóng băng (Object.freeze)
- * ngay sau khi parse, mọi thao tác chuột chỉ đổi ma trận nhìn (pan/zoom).
+ * viewer.js — 2D drawing viewer on <canvas>. READ-ONLY.
+ * No API to edit/delete entities: the drawing data is frozen (Object.freeze)
+ * right after parsing; every mouse action only changes the view matrix (pan/zoom).
  */
 (function (global) {
   'use strict';
 
-  /* Độ dày nét theo layer (mm quy đổi ra px ở tỷ lệ 1:1) */
+  /* Line weight per layer (mm mapped to px at 1:1 scale) */
   var LINEWEIGHT = { TUONG: 2.0, KHUNG_TEN: 1.4, CUA_SO: 1.0, VAN_BAN: 1.0, DEFAULT: 1.0 };
 
   function Viewer(canvas, doc, opts) {
@@ -15,15 +15,15 @@
     this.doc = doc;
     this.opts = opts || {};
     this.scale = 1; this.ox = 0; this.oy = 0;   // world -> screen
-    this.hidden = {};                            // { layerName: true } = đang tắt
-    this.suppressed = false;                     // true = ẩn bản vẽ (vd: DevTools đang mở)
+    this.hidden = {};                            // { layerName: true } = currently off
+    this.suppressed = false;                     // true = drawing hidden (e.g. DevTools open)
     this.watermark = this.opts.watermark || null;
     this.dpr = Math.min(global.devicePixelRatio || 1, 2);
     this._bind();
     this.resize();
   }
 
-  /* ---------- toạ độ ---------- */
+  /* ---------- coordinates ---------- */
   Viewer.prototype.toScreen = function (x, y) {
     return { x: (x - this.ox) * this.scale, y: (this.oy - y) * this.scale };
   };
@@ -82,7 +82,7 @@
     this.render();
   };
 
-  /* ---------- vẽ ---------- */
+  /* ---------- drawing ---------- */
   Viewer.prototype.render = function () {
     var ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -90,9 +90,9 @@
     ctx.fillStyle = this.opts.bg || '#1e2532';
     ctx.fillRect(0, 0, this.W, this.H);
 
-    /* Bị ẩn (vd: DevTools mở): KHÔNG vẽ entity/watermark -> canvas không chứa pixel
-       bản vẽ để soi qua DevTools. Khác với lớp blur CSS (xoá class là hết), ở đây dữ
-       liệu ảnh thật sự không được sinh ra. */
+    /* Suppressed (e.g. DevTools open): do NOT draw entities/watermark -> the canvas holds
+       no drawing pixels to inspect through DevTools. Unlike a CSS blur layer (removing the
+       class reveals it again), here the image data is genuinely never produced. */
     if (this.suppressed) { this._suppressedNotice(ctx); return; }
 
     if (this.opts.grid !== false) this._grid(ctx);
@@ -115,8 +115,8 @@
     this._scalebar(ctx);
   };
 
-  /* Bật/tắt chế độ ẩn bản vẽ. Vẽ lại ngay để canvas trống (khi bật) hoặc hiện lại
-     (khi tắt). Mọi thao tác pan/zoom sau đó cũng chỉ vẽ màn trống khi còn bật. */
+  /* Toggle the drawing-hidden mode. Re-render immediately so the canvas goes blank (when on)
+     or reappears (when off). Any subsequent pan/zoom also only paints a blank screen while on. */
   Viewer.prototype.setSuppressed = function (on, msg) {
     on = !!on;
     this.suppressMsg = on ? (msg || null) : null;
@@ -130,10 +130,10 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(240,165,51,.9)';
     ctx.font = '600 15px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Bản vẽ đã được ẩn', this.W / 2, this.H / 2 - 11);
+    ctx.fillText('Drawing hidden', this.W / 2, this.H / 2 - 11);
     ctx.fillStyle = 'rgba(255,255,255,.45)';
     ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(this.suppressMsg || 'Phát hiện DevTools đang mở — đóng lại để xem tiếp.',
+    ctx.fillText(this.suppressMsg || 'DevTools detected as open — close it to continue viewing.',
       this.W / 2, this.H / 2 + 12);
     ctx.restore();
   };
@@ -163,7 +163,7 @@
       case 'ARC': {
         var ac = s(e.cx, e.cy), ar = e.r * this.scale;
         if (ar < 0.3) break;
-        /* DXF: góc CCW theo trục Y hướng lên; canvas Y hướng xuống -> đảo dấu và đảo chiều */
+        /* DXF: angles CCW with Y pointing up; canvas Y points down -> negate and reverse direction */
         ctx.beginPath();
         ctx.arc(ac.x, ac.y, ar, -e.a2 * Math.PI / 180, -e.a1 * Math.PI / 180);
         ctx.stroke();
@@ -207,7 +207,7 @@
       }
       case 'TEXT': {
         var h = e.h * this.scale;
-        if (h < 4 || !e.text) break;                        // quá nhỏ: bỏ qua cho nhẹ
+        if (h < 4 || !e.text) break;                        // too small: skip to stay light
         var tp = s(e.x, e.y);
         ctx.save();
         ctx.translate(tp.x, tp.y);
@@ -222,7 +222,7 @@
     }
   };
 
-  /* --- lưới nền mờ --- */
+  /* --- faint background grid --- */
   Viewer.prototype._grid = function (ctx) {
     var step = 1000;                                   // 1 m
     while (step * this.scale < 28) step *= 5;
@@ -244,7 +244,7 @@
     ctx.restore();
   };
 
-  /* --- thước tỷ lệ góc dưới --- */
+  /* --- scale bar in the bottom corner --- */
   Viewer.prototype._scalebar = function (ctx) {
     var target = 130, unit = 1;
     while (unit * this.scale < target) unit *= 10;
@@ -263,7 +263,7 @@
     ctx.restore();
   };
 
-  /* --- WATERMARK: vẽ trực tiếp vào canvas nên có mặt trong mọi ảnh chụp --- */
+  /* --- WATERMARK: drawn directly onto the canvas so it is present in every screenshot --- */
   Viewer.prototype.drawWatermark = function (ctx, W, H, wm) {
     var text = wm.text || '';
     var sub = wm.sub || '';
@@ -293,7 +293,7 @@
     ctx.restore();
   };
 
-  /* ---------- tương tác: chỉ pan/zoom, không tạo/sửa hình ---------- */
+  /* ---------- interaction: pan/zoom only, no creating/editing shapes ---------- */
   Viewer.prototype._bind = function () {
     var self = this, drag = null, pinch = null;
     var cv = this.canvas;
@@ -325,7 +325,7 @@
       self.zoomAt(ev.clientX - r.left, ev.clientY - r.top, ev.deltaY < 0 ? 1.15 : 1 / 1.15);
     }, { passive: false });
 
-    /* pinch zoom cho cảm ứng */
+    /* pinch zoom for touch */
     cv.addEventListener('touchmove', function (ev) {
       if (ev.touches.length !== 2) return;
       ev.preventDefault();
@@ -342,7 +342,7 @@
     global.addEventListener('resize', function () { self.resize(); });
   };
 
-  /* dùng lại từ parser */
+  /* reused from the parser */
   function computeExtents(entities) {
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     function add(x, y) {

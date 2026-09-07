@@ -1,32 +1,32 @@
 /*
- * dwg-loader.js — Đọc file DWG NHỊ PHÂN ngay trong trình duyệt.
+ * dwg-loader.js — Read BINARY DWG files right inside the browser.
  *
- * Dùng GNU LibreDWG biên dịch sang WebAssembly (@mlightcad/libredwg-web).
- * Luồng: .dwg (ArrayBuffer) -> WASM -> chuỗi DXF -> DXF.parse() -> canvas.
+ * Uses GNU LibreDWG compiled to WebAssembly (@mlightcad/libredwg-web).
+ * Flow: .dwg (ArrayBuffer) -> WASM -> DXF string -> DXF.parse() -> canvas.
  *
- * WASM nặng ~10 MB nên chỉ nạp khi người dùng thực sự mở một file DWG
- * (lần đầu mất khoảng 1 giây, các lần sau dùng lại instance đã nạp).
+ * The WASM is ~10 MB, so it is only loaded when the user actually opens a DWG file
+ * (the first time takes about 1 second, later times reuse the already-loaded instance).
  *
- * ==========================  CẢNH BÁO BẢN QUYỀN  ==========================
- * LibreDWG là GPL-3.0. Nhúng nó vào một sản phẩm thương mại đóng mã nguồn
- * sẽ kéo theo nghĩa vụ GPL cho toàn bộ sản phẩm. Nếu khách hàng bán phần mềm
- * này thì phải thay bằng:
- *   - ODA SDK (Open Design Alliance) — license thương mại, chuẩn công nghiệp
- *   - Autodesk Platform Services    — dịch vụ đám mây, trả tiền theo lượt convert
- *   - ODA File Converter chạy ở server — kiểm tra kỹ điều khoản dùng thương mại
- * Xem README.md, mục "Đọc file DWG".
+ * ==========================  COPYRIGHT WARNING  ==========================
+ * LibreDWG is GPL-3.0. Embedding it into a closed-source commercial product
+ * carries the GPL obligation over the entire product. If a client sells this
+ * software, it must be replaced with one of:
+ *   - ODA SDK (Open Design Alliance) — commercial license, industry standard
+ *   - Autodesk Platform Services    — cloud service, pay per conversion
+ *   - ODA File Converter running on a server — check the commercial-use terms carefully
+ * See README.md, section "Reading DWG files".
  * =========================================================================
  */
 (function (global) {
   'use strict';
 
-  /* import() động coi đường dẫn tương đối trần là "bare specifier" và từ chối,
-     nên phải dựng URL tuyệt đối từ base URL của trang. */
+  /* Dynamic import() treats a bare relative path as a "bare specifier" and rejects it,
+     so we must build an absolute URL from the page's base URL. */
   var BASE = new URL('js/vendor/libredwg/', document.baseURI).href;
   var instance = null;
   var loading = null;
 
-  /* Nạp WASM một lần, dùng lại cho các file sau */
+  /* Load the WASM once, reuse it for later files */
   function ensure() {
     if (instance) return Promise.resolve(instance);
     if (loading) return loading;
@@ -41,15 +41,15 @@
       .catch(function (err) {
         loading = null;
         if (location.protocol === 'file:') {
-          throw new Error('Đọc DWG cần chạy qua HTTP. Mở thư mục dự án rồi gõ: npx serve . ' +
-            '(trình duyệt chặn WebAssembly và ES module khi mở bằng file://)');
+          throw new Error('Reading DWG requires running over HTTP. Open the project folder and run: npx serve . ' +
+            '(browsers block WebAssembly and ES modules when opened via file://)');
         }
-        throw new Error('Không nạp được bộ đọc DWG: ' + err.message);
+        throw new Error('Could not load the DWG reader: ' + err.message);
       });
     return loading;
   }
 
-  /* Nhận diện định dạng qua chữ ký đầu file: DWG bắt đầu bằng "AC10xx" */
+  /* Detect the format from the file's signature: DWG starts with "AC10xx" */
   function sniff(buf) {
     var head = new Uint8Array(buf, 0, Math.min(6, buf.byteLength));
     var sig = String.fromCharCode.apply(null, head);
@@ -64,8 +64,8 @@
   };
 
   /*
-   * Trả về { dxf, format, version, ms } — dxf là chuỗi DXF để đưa vào DXF.parse().
-   * File DXF thì đi thẳng, không cần WASM.
+   * Returns { dxf, format, version, ms } — dxf is the DXF string to feed into DXF.parse().
+   * A DXF file goes straight through, no WASM needed.
    */
   function toDxf(buf) {
     var info = sniff(buf);
@@ -81,7 +81,7 @@
 
     return ensure().then(function (dwg) {
       var bytes = dwg.dwg_write_dxf(buf);
-      if (!bytes) throw new Error('LibreDWG không đọc được file DWG này (có thể hỏng hoặc dùng bản AutoCAD quá mới).');
+      if (!bytes) throw new Error('LibreDWG could not read this DWG file (it may be corrupted or use too new an AutoCAD version).');
       return {
         dxf: new TextDecoder('utf-8', { fatal: false }).decode(bytes),
         format: 'DWG',

@@ -1,64 +1,65 @@
 /*
- * app.js — Ghép mọi thứ lại.
+ * app.js — Wires everything together.
  *
- * Luồng: DWG nhúng sẵn (base64) -> LibreDWG WASM -> DXF -> parse -> khoá chỉ đọc
- *        -> viewer -> layer/layout -> watermark -> DRM -> xuất PDF.
- * Người dùng cũng mở được file .dwg khác từ máy; đọc tại chỗ, không upload.
+ * Flow: embedded DWG (base64) -> LibreDWG WASM -> DXF -> parse -> read-only lock
+ *       -> viewer -> layer/layout -> watermark -> DRM -> PDF export.
+ * The user can also open another .dwg file from disk; it is read locally, never uploaded.
  */
 (function () {
   'use strict';
 
-  /* ---------- Hồ sơ người xem (thực tế lấy từ phiên đăng nhập) ---------- */
+  /* ---------- Viewer profile (in production, taken from the login session) ---------- */
   var USER = {
-    name: 'Nguyễn Văn An',
-    email: 'nguyenvanan@nhathau-me.vn',
-    phone: '0912***456',
-    role: 'Nhà thầu M&E',
-    company: 'CÔNG TY CP XÂY DỰNG DEMO'
+    name: 'John Smith',
+    email: 'john.smith@demo-construction.com',
+    phone: '555-0142',
+    role: 'M&E Contractor',
+    company: 'DEMO CONSTRUCTION JSC'
   };
   var DOC = {
-    title: 'Mặt bằng bố trí nội thất — Căn hộ A-01.02',
+    title: 'Interior Layout Plan — Apartment A-01.02',
     code: 'KT-02-A0102',
     rev: 'C'
   };
 
-  /* ---------- Layout: mỗi layout = một tổ hợp layer ---------- */
+  /* ---------- Layout: each layout = one combination of layers ---------- */
   var LAYOUTS = [
-    { id: 'a3', name: 'Layout A3 — Bản in đầy đủ', desc: 'Toàn bộ layer, có khung tên', hide: [] },
-    { id: 'model', name: 'Model — Mặt bằng', desc: 'Chỉ phần bản vẽ, ẩn khung tên', hide: ['KHUNG_TEN'] },
-    { id: 'kt', name: 'Kiến trúc — Không nội thất', desc: 'Ẩn thiết bị, hatch và khung tên', hide: ['KHUNG_TEN', 'THIET_BI', 'HATCH'] },
-    { id: 'dim', name: 'Trục &amp; kích thước', desc: 'Chỉ tường, trục định vị và kích thước', hide: ['KHUNG_TEN', 'THIET_BI', 'HATCH', 'VAN_BAN', 'CUA_SO'] }
+    { id: 'a3', name: 'A3 Layout — Full print', desc: 'All layers, with title block', hide: [] },
+    { id: 'model', name: 'Model — Floor plan', desc: 'Drawing only, title block hidden', hide: ['KHUNG_TEN'] },
+    { id: 'kt', name: 'Architecture — No furniture', desc: 'Hides equipment, hatch and title block', hide: ['KHUNG_TEN', 'THIET_BI', 'HATCH'] },
+    { id: 'dim', name: 'Grid &amp; dimensions', desc: 'Walls, grid lines and dimensions only', hide: ['KHUNG_TEN', 'THIET_BI', 'HATCH', 'VAN_BAN', 'CUA_SO'] }
   ];
   var LAYER_LABEL = {
-    'TUONG': 'Tường', 'CUA_SO': 'Cửa đi / cửa sổ', 'THIET_BI': 'Thiết bị — Nội thất',
-    'HATCH': 'Hatch sàn', 'TRUC': 'Trục định vị', 'KICH_THUOC': 'Kích thước',
-    'VAN_BAN': 'Văn bản — Ghi chú', 'KHUNG_TEN': 'Khung tên', '0': 'Layer 0'
+    'TUONG': 'Walls', 'CUA_SO': 'Doors / windows', 'THIET_BI': 'Equipment — Furniture',
+    'HATCH': 'Floor hatch', 'TRUC': 'Grid lines', 'KICH_THUOC': 'Dimensions',
+    'VAN_BAN': 'Text — Notes', 'KHUNG_TEN': 'Title block', '0': 'Layer 0'
   };
 
   var $ = function (id) { return document.getElementById(id); };
   var sessionId = genSession();
   var startedAt = new Date();
   var violations = [];
-  /* Chỉ true khi trình duyệt đã xác nhận ghi được clipboard (qua cổng ở mục 9).
-     Vừa khoá VIEW (cổng che app) vừa khoá TẢI (chốt trong hàm Xuất PDF ở mục 7):
-     mất quyền -> không xem, không tải. */
+  /* Only true once the browser has confirmed it can write the clipboard (via the gate
+     in section 9). Locks both VIEW (the gate covers the app) and DOWNLOAD (the guard in
+     the PDF export handler, section 7): no permission -> no viewing, no downloading. */
   var clipboardOK = false;
-  /* true khi DevTools đang mở -> ẩn bản vẽ ở tầng canvas. Nhớ trạng thái để nếu bản
-     vẽ tải xong lúc DevTools đang mở thì vẫn hiện màn ẩn ngay. */
+  /* true while DevTools is open -> hide the drawing at the canvas layer. We remember the
+     state so that if the drawing finishes loading while DevTools is open, it still shows
+     the hidden screen immediately. */
   var devtoolsOpen = false;
 
-  /* ================= 1. Watermark (định danh người xem — cố định) ================= */
+  /* ================= 1. Watermark (viewer identity — fixed) ================= */
   var wm = {
-    text: 'NGUYỄN VĂN AN · 0912***456',
+    text: 'JOHN SMITH · 555-0142',
     sub: fmtTime(startedAt) + '  ·  ' + sessionId,
     opacity: 0.13,
     size: 42,
     color: '#ffffff'
   };
 
-  /* ================= 2. Trạng thái tài liệu đang mở ================= */
-  var doc = null;          // cây dữ liệu bản vẽ (đã đóng băng)
-  var viewer = null;       // trình xem
+  /* ================= 2. Currently-open document state ================= */
+  var doc = null;          // drawing data tree (frozen)
+  var viewer = null;       // the viewer
   var currentLayout = null;
   var layerRows = {};
   var srcInfo = { format: 'DWG', version: 'AutoCAD 2000', name: 'MB-CH-A0102' };
@@ -66,26 +67,26 @@
   var layoutBox = $('layouts');
   var layerBox = $('layers');
 
-  /* Layout dựng sẵn chỉ đúng với bản vẽ mẫu. File người dùng mở lên có tên layer
-     khác hẳn, nên khi đó chuyển sang một layout duy nhất "toàn bộ bản vẽ". */
+  /* The preset layouts only match the sample drawing. A file the user opens has completely
+     different layer names, so in that case we fall back to a single "whole drawing" layout. */
   function layoutsFor(d) {
     var known = ['TUONG', 'KHUNG_TEN', 'THIET_BI', 'KICH_THUOC'];
     var hit = known.filter(function (n) { return d.layers[n]; }).length;
     if (hit >= 3) return LAYOUTS;
-    return [{ id: 'all', name: 'Toàn bộ bản vẽ', desc: 'Hiển thị mọi layer trong file', hide: [] }];
+    return [{ id: 'all', name: 'Whole drawing', desc: 'Show every layer in the file', hide: [] }];
   }
 
   /*
-   * Nạp bản vẽ mới. Tham số là chuỗi DXF do LibreDWG WASM sinh ra từ file DWG
-   * (DXF ở đây chỉ là định dạng trung gian trong bộ nhớ, không lộ ra giao diện).
-   * Viewer cũ bị bỏ, dựng lại từ đầu.
+   * Load a new drawing. The argument is the DXF string LibreDWG WASM produces from the DWG
+   * file (DXF here is just an in-memory intermediate format, never exposed in the UI).
+   * The old viewer is discarded and rebuilt from scratch.
    */
   function loadDocument(dxfText, info) {
     var d = window.DXF.parse(dxfText);
-    if (!d.entities.length) throw new Error('File không có đối tượng nào để hiển thị.');
+    if (!d.entities.length) throw new Error('The file has no objects to display.');
 
-    /* Chỉ đọc thật sự: đóng băng toàn bộ cây dữ liệu. Sau lệnh này mọi phép
-       ghi/xoá lên entity đều bị JS bỏ qua (và ném lỗi ở strict mode). */
+    /* Truly read-only: freeze the entire data tree. After this, every write/delete on an
+       entity is silently ignored by JS (and throws in strict mode). */
     deepFreeze(d.entities);
     deepFreeze(d.layers);
     Object.freeze(d.extents);
@@ -108,12 +109,12 @@
     viewer.applyLayout(currentLayout);
     viewer.fit();
     paintDocInfo();
-    /* Nếu DevTools đang mở HOẶC clipboard đã mất quyền lúc bản vẽ vừa tải: ẩn ngay,
-       đừng để loé ra một khung hình. */
+    /* If DevTools is open OR clipboard permission was lost as the drawing loaded: hide it
+       immediately, don't let a single frame flash through. */
     applySuppress();
   }
 
-  /* -- danh sách layout -- */
+  /* -- layout list -- */
   function buildLayouts(list) {
     currentLayout = list[0];
     if (!layoutBox) return;
@@ -135,7 +136,7 @@
     });
   }
 
-  /* -- danh sách layer -- */
+  /* -- layer list -- */
   function buildLayerList() {
     layerRows = {};
     if (!layerBox) return;
@@ -177,7 +178,7 @@
     });
   }
 
-  /* ================= 3. Mở file DWG khác (đọc tại máy, không upload) ================= */
+  /* ================= 3. Open another DWG file (read locally, never uploaded) ================= */
   if ($('btn-open') && $('file-input')) {
     $('btn-open').addEventListener('click', function () { $('file-input').click(); });
     $('file-input').addEventListener('change', function () {
@@ -188,7 +189,7 @@
     });
   }
 
-  /* kéo thả file vào vùng vẽ */
+  /* drag & drop a file onto the drawing area */
   var main = document.querySelector('.main');
   ['dragenter', 'dragover'].forEach(function (ev) {
     main.addEventListener(ev, function (e) { e.preventDefault(); main.classList.add('drop'); });
@@ -204,12 +205,12 @@
   function openFile(file) {
     var nm = file.name;
     if (!/\.dwg$/i.test(nm)) {
-      window.DRM.toast('Chỉ nhận file .dwg', 'block');
+      window.DRM.toast('Only .dwg files are accepted', 'block');
       return;
     }
-    setBusy('Đang đọc ' + nm + '…');
+    setBusy('Reading ' + nm + '…');
     var fr = new FileReader();
-    fr.onerror = function () { setBusy(null); window.DRM.toast('Không đọc được file.', 'block'); };
+    fr.onerror = function () { setBusy(null); window.DRM.toast('Could not read the file.', 'block'); };
     fr.onload = function () {
       window.DWGLoader.toDxf(fr.result)
         .then(function (r) {
@@ -219,13 +220,13 @@
             name: nm.replace(/\.[^.]+$/, '')
           });
           setBusy(null);
-          window.DRM.toast('Đã mở ' + nm + ' · ' + r.version + ' · ' +
-            doc.entities.length + ' đối tượng · ' + r.ms + ' ms', 'ok');
+          window.DRM.toast('Opened ' + nm + ' · ' + r.version + ' · ' +
+            doc.entities.length + ' objects · ' + r.ms + ' ms', 'ok');
           logViolation('open-file', nm + ' (' + r.format + ')');
         })
         .catch(function (err) {
           setBusy(null);
-          window.DRM.toast('Lỗi: ' + err.message, 'block');
+          window.DRM.toast('Error: ' + err.message, 'block');
         });
     };
     fr.readAsArrayBuffer(file);
@@ -239,13 +240,13 @@
 
   function paintDocInfo() {
     $('ent-count').textContent = doc.entities.length;
-    $('st-size').textContent = Object.keys(doc.layers).length + ' layer';
-    $('st-format').textContent = 'DWG nhị phân · ' + srcInfo.version;
+    $('st-size').textContent = Object.keys(doc.layers).length + ' layers';
+    $('st-format').textContent = 'Binary DWG · ' + srcInfo.version;
     $('doc-name').textContent = srcInfo.name;
     $('badge-fmt').textContent = srcInfo.format;
   }
 
-  /* ================= 5. Thanh công cụ ================= */
+  /* ================= 5. Toolbar ================= */
   $('btn-fit').addEventListener('click', function () { viewer.fit(); });
   $('t-fit').addEventListener('click', function () { viewer.fit(); });
   $('t-zin').addEventListener('click', function () { viewer.zoomAt(viewer.W / 2, viewer.H / 2, 1.3); });
@@ -259,37 +260,38 @@
     if (ev.key === 'f' || ev.key === 'F') viewer.fit();
   });
 
-  /* ================= 6. DRM — bật cố định, không có công tắc tắt ================= */
+  /* ================= 6. DRM — always on, no off switch ================= */
   window.DRM.init({
     wipeNote: 'Anh chup man hinh da bi vo hieu hoa - ban ve ' + DOC.code +
       ' thuoc tai lieu kiem soat - cap cho ' + USER.email + ' - phien ' + sessionId,
-    /* In lên chính tấm ảnh cảnh báo dán đè vào clipboard: ai chụp, bản vẽ nào, lúc nào */
+    /* Printed onto the warning image pasted over the clipboard: who captured, which drawing, when */
     wipeLines: [
-      'Bản vẽ: ' + DOC.code + ' Rev.' + DOC.rev,
-      'Cấp cho: ' + USER.name + ' · ' + USER.email,
-      'Phiên xem: ' + sessionId + ' · ' + fmtTime(startedAt)
+      'Drawing: ' + DOC.code + ' Rev.' + DOC.rev,
+      'Issued to: ' + USER.name + ' · ' + USER.email,
+      'Viewing session: ' + sessionId + ' · ' + fmtTime(startedAt)
     ],
     onViolation: logViolation,
-    /* DevTools mở -> ẩn bản vẽ (canvas không vẽ entity nào); đóng -> hiện lại. */
+    /* DevTools open -> hide the drawing (canvas draws no entities); closed -> show again. */
     onDevtools: function (open) {
       devtoolsOpen = open;
       applySuppress();
     },
-    /* Mỗi lần drm.js phá clipboard: ok=false nghĩa là mất quyền ghi clipboard ngay
-       lúc này -> lớp chống chụp đã chết -> hạ trạng thái xuống "không có quyền". */
+    /* Each time drm.js wipes the clipboard: ok=false means the clipboard could not be
+       written right now -> the anti-screenshot layer is dead -> downgrade to "no permission". */
     onWipe: function (ok) {
-      /* KHÔNG ẩn bản vẽ chỉ vì một lần ghi clipboard hỏng: ghi clipboard đòi hỏi
-         document đang focus, nên lúc focus in/out nó có thể hỏng tạm thời dù vẫn còn
-         quyền. Xác minh lại quyền THỰC bằng Permissions API rồi mới quyết định. */
+      /* Do NOT hide the drawing just because one clipboard write failed: writing the
+         clipboard requires the document to be focused, so during focus in/out it can fail
+         transiently even while permission is still granted. Re-verify the REAL permission
+         via the Permissions API before deciding. */
       if (!ok) reverifyClipboard('wipe-failed');
     }
   });
 
-  /* ---- Quyền Clipboard = nguồn sự thật cho HIỂN THỊ + TẢI ----
-     clipboardOK phản ánh quyền THỰC TẾ của trình duyệt lúc này (đọc qua Permissions
-     API + cập nhật theo onchange, và bị hạ xuống nếu một lần phá clipboard thất bại).
-     Không có quyền -> ẩn bản vẽ (canvas trống) + hiện cổng hướng dẫn + khoá tải.
-     Có quyền trở lại -> tự hiển thị, không cần reload. */
+  /* ---- Clipboard permission = source of truth for DISPLAY + DOWNLOAD ----
+     clipboardOK reflects the browser's ACTUAL permission right now (read via the Permissions
+     API + kept current by onchange, and downgraded if a clipboard wipe fails). No permission
+     -> hide the drawing (blank canvas) + show the instruction gate + lock download.
+     Permission back -> auto-display, no reload needed. */
   var drawingLoaded = false;
   var clipEvaluated = false;
 
@@ -297,35 +299,37 @@
     if (!viewer) return;
     viewer.setSuppressed(devtoolsOpen || !clipboardOK,
       (!clipboardOK && !devtoolsOpen)
-        ? 'Chưa có quyền Clipboard — vào cài đặt quyền của trình duyệt cho trang này để xem.'
+        ? 'No Clipboard permission yet — open the browser permission settings for this page to view.'
         : undefined);
   }
 
   function applyClipboard(granted, reason) {
     granted = !!granted;
     var changed = granted !== clipboardOK;
-    clipboardOK = granted;               // khoá/mở nút Xuất PDF (mục 7)
-    applySuppress();                     // ẩn/hiện canvas
-    showGate(!granted);                  // hiện/ẩn cổng hướng dẫn
+    clipboardOK = granted;               // lock/unlock the Export PDF button (section 7)
+    applySuppress();                     // hide/show the canvas
+    showGate(!granted);                  // show/hide the instruction gate
     if (granted && !drawingLoaded) { drawingLoaded = true; loadEmbeddedDrawing(); }
     if (changed && clipEvaluated) {
       if (granted) {
         logViolation('clipboard-granted', reason || '');
-        window.DRM.toast('Đã có quyền Clipboard — hiển thị bản vẽ.', 'ok');
+        window.DRM.toast('Clipboard permission granted — displaying the drawing.', 'ok');
       } else {
         logViolation('clipboard-blocked', reason || '');
-        window.DRM.toast('Không có quyền Clipboard — bản vẽ tạm ẩn, không thể tải.', 'block');
+        window.DRM.toast('No Clipboard permission — the drawing is hidden and cannot be downloaded.', 'block');
       }
     }
     clipEvaluated = true;
   }
 
-  /* Một lần phá clipboard thất bại CÓ THỂ chỉ do trang tạm mất focus (write clipboard
-     đòi hỏi document đang focus) chứ không phải mất quyền -> đừng ẩn bản vẽ vội.
-     - Có Permissions API: hỏi lại trạng thái quyền (không phụ thuộc focus); chỉ chặn
-       khi đúng là không 'granted'. Nếu vẫn 'granted' -> lờ đi (chỉ là nhiễu do focus).
-     - Không có Permissions API: chỉ chặn nếu trang đang focus (loại lỗi "not focused").
-     Việc thu hồi quyền thật trên Chromium vẫn được bắt độc lập qua onchange ở mục 9. */
+  /* A single clipboard-wipe failure MIGHT just be the page briefly losing focus (writing
+     the clipboard requires the document to be focused) rather than losing permission ->
+     don't hide the drawing hastily.
+     - With the Permissions API: re-query the permission state (focus-independent); only
+       block if it is genuinely not 'granted'. If still 'granted' -> ignore (focus noise).
+     - Without the Permissions API: only block if the page is focused (rules out the
+       "not focused" error).
+     A real revocation on Chromium is still caught independently via onchange in section 9. */
   function reverifyClipboard(reason) {
     if (navigator.permissions && navigator.permissions.query) {
       navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
@@ -352,10 +356,10 @@
       box.insertBefore(line, box.firstChild);
       while (box.children.length > 12) box.removeChild(box.lastChild);
     }
-    /* Thực tế: POST /api/audit {user, doc, type, detail, ts} — không chặn được nhưng ghi được vết */
+    /* In production: POST /api/audit {user, doc, type, detail, ts} — can't block, but leaves a trace */
   }
 
-  /* ================= 7. Xuất PDF ================= */
+  /* ================= 7. PDF Export ================= */
   var xPaper = 'a3', xMode = 'bw';
   bindSeg('seg-paper', function (v) { xPaper = v; });
   bindSeg('seg-mode', function (v) { xMode = v; });
@@ -378,18 +382,18 @@
 
   $('x-go').addEventListener('click', function () {
     var btn = this;
-    /* Chốt tải: không có quyền clipboard đang hoạt động thì KHÔNG cho xuất file.
-       Chính sách: mất lớp chống chụp màn hình -> không phát tài liệu ra khỏi trình duyệt. */
+    /* Download guard: with no active clipboard permission, do NOT export a file.
+       Policy: without the anti-screenshot layer -> don't release the document out of the browser. */
     if (!clipboardOK) {
-      window.DRM.toast('Cần quyền Clipboard đang hoạt động mới được tải PDF. Hãy cấp lại quyền rồi thử lại.', 'block');
+      window.DRM.toast('An active Clipboard permission is required to download the PDF. Grant it and try again.', 'block');
       logViolation('export-blocked', 'no-clipboard');
       return;
     }
-    btn.disabled = true; btn.textContent = 'Đang kết xuất…';
+    btn.disabled = true; btn.textContent = 'Rendering…';
     setTimeout(function () {
       try {
         var now = new Date();
-        /* Cố định: chỉ kết xuất các layer đang hiển thị — không còn tuỳ chọn trong giao diện. */
+        /* Fixed: only render the currently-visible layers — no UI option for this anymore. */
         var r = window.ExportPDF.run(doc, viewer, {
           user: USER.name + ' <' + USER.email + '>',
           company: USER.company,
@@ -399,57 +403,57 @@
           time: fmtTime(now),
           paper: xPaper,
           mode: xMode,
-          /* Chính sách cố định — không có tuỳ chọn tắt trong giao diện:
-             mọi bản PDF xuất ra đều có watermark và cờ cấm in / cấm sao chép. */
+          /* Fixed policy — no off switch in the UI: every exported PDF carries the
+             watermark and the no-print / no-copy flags. */
           protect: true,
           watermarkText: wm.text,
           watermarkSub: fmtTime(now) + ' · ' + USER.email,
           wmOpacity: 0.14
         });
-        /* Tên file = tiêu đề đã bỏ dấu (đọc được) + mã bản vẽ + người tải + mã tra vết.
-           Vì bản mã hoá không ghi /Title (tránh chuỗi rác), thanh tiêu đề của trình đọc
-           sẽ lấy TÊN FILE để hiển thị -> đặt tên file đọc được là cách hiện tiêu đề sạch
-           trên mọi viewer. */
+        /* Filename = readable (de-accented) title + drawing code + downloader + trace id.
+           Because the encrypted PDF writes no /Title (to avoid garbled text), the reader's
+           title bar falls back to the FILENAME -> a readable filename is how we show a clean
+           title in every viewer. */
         var safe = function (s) { return String(s).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim(); };
         r.pdf.save(safe(r.title) + ' - ' + safe(DOC.code) + ' - ' + USER.email.split('@')[0] + ' - ' + r.traceId + '.pdf');
         $('modal').classList.remove('on');
-        window.DRM.toast('Đã xuất PDF · ' + r.count + ' đối tượng · mã tra vết ' + r.traceId, 'ok');
+        window.DRM.toast('PDF exported · ' + r.count + ' objects · trace id ' + r.traceId, 'ok');
         logViolation('export-pdf', r.traceId);
       } catch (err) {
-        window.DRM.toast('Lỗi kết xuất: ' + err.message, 'block');
+        window.DRM.toast('Export error: ' + err.message, 'block');
         console.error(err);
       }
-      btn.disabled = false; btn.textContent = 'Kết xuất & tải về';
+      btn.disabled = false; btn.textContent = 'Render & download';
     }, 60);
   });
 
-  /* ================= 8. Định danh người xem hiển thị trên giao diện ================= */
+  /* ================= 8. Viewer identity shown in the UI ================= */
   $('u-name').textContent = USER.name;
-  $('u-role').textContent = USER.role + ' · Quyền: XEM + TẢI PDF';
+  $('u-role').textContent = USER.role + ' · Access: VIEW + DOWNLOAD PDF';
   $('ava').textContent = initials(USER.name);
   $('ov-user').textContent = USER.email;
   $('ov-session').textContent = sessionId;
 
-  /* ================= 9. Kiểm tra quyền Clipboard thực tế ================= */
+  /* ================= 9. Check the real Clipboard permission ================= */
   /*
-   * Chính sách: lớp chống chụp màn hình (drm.js) bảo vệ tài liệu bằng cách GHI ĐÈ
-   * clipboard. Vì vậy khi TRUY CẬP, đọc quyền clipboard THỰC TẾ của trình duyệt:
-   *   - Có quyền           -> hiển thị bản vẽ, cho tải.
-   *   - Chưa/không có quyền -> tạm ẩn bản vẽ + khoá tải + hiện hướng dẫn để người dùng
-   *     TỰ vào cài đặt quyền của trình duyệt bật lên. Quyền đổi (onchange) -> tự hiển
-   *     thị lại, không cần reload.
+   * Policy: the anti-screenshot layer (drm.js) protects the document by OVERWRITING the
+   * clipboard. So on ENTRY, read the browser's ACTUAL clipboard permission:
+   *   - Granted        -> display the drawing, allow download.
+   *   - Not yet/denied -> temporarily hide the drawing + lock download + show instructions
+   *     for the user to enable it THEMSELVES in the browser permission settings. When the
+   *     permission changes (onchange) -> auto-display again, no reload needed.
    */
   var CLIP_MSG = {
-    checking: 'Đang kiểm tra quyền Clipboard của trình duyệt…',
-    blocked: 'Trình duyệt đang chặn/chưa cấp quyền Clipboard cho trang này. Mở cài đặt quyền của trang ' +
-      '(bấm biểu tượng 🔒/⚙ cạnh thanh địa chỉ → Cài đặt trang → mục Clipboard/Bảng tạm → chọn Cho phép) — ' +
-      'trang sẽ tự hiển thị lại. Hoặc bấm “Kiểm tra lại”.',
-    insecure: 'Trang không chạy qua HTTPS nên Clipboard API bị trình duyệt khoá — không thể bảo vệ tài liệu. Hãy mở qua đường https.',
-    unsupported: 'Trình duyệt không hỗ trợ Clipboard API cần thiết. Hãy dùng Chrome/Edge bản mới.',
-    needProbe: 'Trình duyệt này không cho đọc trạng thái quyền. Bấm “Kiểm tra & mở bản vẽ” để xác nhận quyền Clipboard.'
+    checking: 'Checking the browser Clipboard permission…',
+    blocked: 'The browser is blocking / has not granted the Clipboard permission for this page. Open the ' +
+      'page permission settings (click the 🔒/⚙ icon next to the address bar → Site settings → Clipboard → ' +
+      'select Allow) — the page will display again automatically. Or click “Retry”.',
+    insecure: 'The page is not served over HTTPS, so the Clipboard API is locked by the browser — the document cannot be protected. Please open it over https.',
+    unsupported: 'This browser does not support the required Clipboard API. Please use a recent Chrome/Edge.',
+    needProbe: 'This browser does not allow reading the permission state. Click “Check & open drawing” to confirm the Clipboard permission.'
   };
 
-  /* 1x1 png để thử đúng đường ghi ẢNH mà lớp bảo vệ sẽ dùng (không chỉ ghi text) */
+  /* 1x1 png to test the exact IMAGE-write path the protection layer uses (not just text) */
   function probeImage() {
     return new Promise(function (res, rej) {
       var c = document.createElement('canvas');
@@ -458,8 +462,8 @@
     });
   }
 
-  /* Thử GHI THẬT vào clipboard — dùng cho nút bấm (cần user gesture) và cho trình
-     duyệt không đọc được trạng thái quyền. Reject bằng mã: insecure/unsupported/denied. */
+  /* Actually WRITE to the clipboard — used by the button (needs a user gesture) and by
+     browsers that can't read the permission state. Rejects with a code: insecure/unsupported/denied. */
   function probeClipboard() {
     if (!window.isSecureContext) return Promise.reject('insecure');
     if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) {
@@ -468,14 +472,14 @@
     return probeImage().then(function (img) {
       return navigator.clipboard.write([new window.ClipboardItem({
         'image/png': img,
-        'text/plain': new Blob(['[Kiem tra quyen clipboard - he thong phan phoi ban ve]'], { type: 'text/plain' })
+        'text/plain': new Blob(['[Clipboard permission check - drawing distribution system]'], { type: 'text/plain' })
       })]);
     }).catch(function (e) {
       throw (e && e.name === 'NotAllowedError') ? 'denied' : (typeof e === 'string' ? e : 'denied');
     });
   }
 
-  /* ---- Cổng hướng dẫn (dựng 1 lần, ẩn/hiện theo quyền) ---- */
+  /* ---- Instruction gate (built once, shown/hidden by permission) ---- */
   var gateEl = null;
   function ensureGate() {
     if (gateEl) return gateEl;
@@ -486,11 +490,11 @@
       '<svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.6">' +
       '<path d="M12 2 4 5.5v6c0 5 3.4 9.2 8 10.5 4.6-1.3 8-5.5 8-10.5v-6L12 2Z"/>' +
       '<path d="m9.5 12 1.9 1.9L15 10"/></svg>' +
-      '<h2>Cần quyền Clipboard</h2>' +
-      '<p>Bản vẽ <b>' + DOC.code + '</b> chỉ hiển thị và cho tải khi trình duyệt cho phép quyền ' +
-      '<b>Clipboard</b> — vì lớp chống chụp màn hình bảo vệ tài liệu ngay trên clipboard.</p>' +
+      '<h2>Clipboard permission required</h2>' +
+      '<p>Drawing <b>' + DOC.code + '</b> is only displayed and downloadable when the browser grants the ' +
+      '<b>Clipboard</b> permission — because the anti-screenshot layer protects the document right on the clipboard.</p>' +
       '<div class="gate-err" id="gate-msg"></div>' +
-      '<button id="gate-btn" type="button">Kiểm tra lại</button>' +
+      '<button id="gate-btn" type="button">Retry</button>' +
       '</div>';
     document.body.appendChild(gateEl);
     gateEl.querySelector('#gate-btn').addEventListener('click', tryProbe);
@@ -503,21 +507,21 @@
     b.textContent = text; b.disabled = !!disabled;
   }
 
-  /* Nút bấm: thử ghi thật (có user gesture). Thành công -> mở; thất bại -> giữ chặn. */
+  /* Button: actually write (with a user gesture). Success -> open; failure -> stay blocked. */
   function tryProbe() {
-    setGateBtn('Đang kiểm tra…', true);
+    setGateBtn('Checking…', true);
     probeClipboard().then(function () {
       applyClipboard(true, 'probe');
     }).catch(function (code) {
       setGateMsg(CLIP_MSG[code] || CLIP_MSG.blocked);
-      setGateBtn('Kiểm tra lại', false);
+      setGateBtn('Retry', false);
       applyClipboard(false, code);
     });
   }
 
-  /* Đọc quyền THỰC TẾ khi truy cập, rồi theo dõi onchange để tự mở/khoá. */
+  /* Read the ACTUAL permission on entry, then watch onchange to auto open/lock. */
   function initClipboard() {
-    ensureGate(); showGate(true); setGateMsg(CLIP_MSG.checking); setGateBtn('Kiểm tra lại', false);
+    ensureGate(); showGate(true); setGateMsg(CLIP_MSG.checking); setGateBtn('Retry', false);
 
     if (!window.isSecureContext) {
       setGateMsg(CLIP_MSG.insecure);
@@ -527,14 +531,14 @@
     if (navigator.permissions && navigator.permissions.query) {
       navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
         applyState(st.state);
-        st.onchange = function () { applyState(st.state); };   // người dùng đổi trong cài đặt -> tự cập nhật
+        st.onchange = function () { applyState(st.state); };   // user changes it in settings -> auto-update
       }).catch(function () {
-        /* Trình duyệt không đọc được trạng thái quyền -> phải bấm probe (có gesture) */
-        setGateMsg(CLIP_MSG.needProbe); setGateBtn('Kiểm tra & mở bản vẽ', false);
+        /* The browser can't read the permission state -> the user must click probe (with a gesture) */
+        setGateMsg(CLIP_MSG.needProbe); setGateBtn('Check & open drawing', false);
         applyClipboard(false, 'no-perm-api');
       });
     } else {
-      setGateMsg(CLIP_MSG.needProbe); setGateBtn('Kiểm tra & mở bản vẽ', false);
+      setGateMsg(CLIP_MSG.needProbe); setGateBtn('Check & open drawing', false);
       applyClipboard(false, 'no-perm-api');
     }
 
@@ -542,23 +546,23 @@
       if (state === 'granted') {
         applyClipboard(true, 'state:granted');
       } else {
-        setGateMsg(CLIP_MSG.blocked); setGateBtn('Kiểm tra lại', false);
+        setGateMsg(CLIP_MSG.blocked); setGateBtn('Retry', false);
         applyClipboard(false, 'state:' + state);
       }
     }
   }
 
-  /* ================= 10. Nạp bản vẽ DWG (chỉ khi đã có quyền) ================= */
+  /* ================= 10. Load the DWG drawing (only once permission is granted) ================= */
   if (!window.EMBEDDED_DWG) {
-    fatal('Không tìm thấy bản vẽ nhúng (data/drawing.js).<br>Chạy: node tools/gen-dxf.js && node tools/make-dwg.js');
+    fatal('Embedded drawing not found (data/drawing.js).<br>Run: node tools/gen-dxf.js && node tools/make-dwg.js');
     return;
   }
 
-  /* Gọi bởi applyClipboard() đúng một lần khi quyền được cấp lần đầu. */
+  /* Called by applyClipboard() exactly once when permission is first granted. */
   function loadEmbeddedDrawing() {
-    setBusy('Đang mở bản vẽ DWG…');
+    setBusy('Opening the DWG drawing…');
     var dwgBytes = b64ToBuffer(window.EMBEDDED_DWG);
-    /* Xoá tham chiếu để không copy được file gốc ra từ console */
+    /* Drop the reference so the original file can't be copied out from the console */
     try { delete window.EMBEDDED_DWG; } catch (e) { window.EMBEDDED_DWG = null; }
 
     window.DWGLoader.toDxf(dwgBytes)
@@ -568,7 +572,7 @@
       })
       .catch(function (err) {
         setBusy(null);
-        fatal('Không mở được bản vẽ DWG.<br><br>' + err.message);
+        fatal('Could not open the DWG drawing.<br><br>' + err.message);
       });
   }
 
@@ -578,7 +582,7 @@
     document.body.innerHTML =
       '<div style="max-width:620px;margin:12vh auto;padding:28px;font:14px/1.7 \'Segoe UI\',sans-serif;' +
       'color:#dbe3f0;background:#121722;border:1px solid #232b3d;border-radius:12px">' +
-      '<h2 style="margin:0 0 10px;font-size:17px;color:#e5484d">Không mở được bản vẽ</h2>' + html + '</div>';
+      '<h2 style="margin:0 0 10px;font-size:17px;color:#e5484d">Could not open the drawing</h2>' + html + '</div>';
   }
 
   function b64ToBuffer(b64) {
@@ -588,7 +592,7 @@
     return arr.buffer;
   }
 
-  /* ================= tiện ích ================= */
+  /* ================= utilities ================= */
   function deepFreeze(o) {
     if (!o || typeof o !== 'object' || Object.isFrozen(o)) return o;
     Object.freeze(o);

@@ -1,20 +1,20 @@
 /*
- * drm.js — Lớp răn đe phía client.
+ * drm.js — Client-side deterrent layer.
  *
- * ĐỌC KỸ TRƯỚC KHI DEMO CHO KHÁCH:
- * Toàn bộ những gì trong file này chạy trong trình duyệt của NGƯỜI XEM, nên nó là
- * hàng rào RĂN ĐE + GHI VẾT, không phải bảo mật thật. Người dùng có kỹ thuật vẫn có
- * thể vượt (tắt JS, dùng máy ảnh điện thoại, phần mềm quay màn hình ngoài trình duyệt,
- * OBS, máy ảo...). Lớp có giá trị pháp lý/kỹ thuật thật sự là:
- *   1) watermark định danh vẽ thẳng vào canvas & vào PDF  -> truy được người làm rò rỉ
- *   2) không bao giờ gửi file gốc DWG xuống client
- *   3) log mọi hành vi vi phạm về server
- * Ba điểm đó mới là thứ nên nhấn mạnh khi tư vấn.
+ * READ CAREFULLY BEFORE DEMOING TO A CLIENT:
+ * Everything in this file runs in the VIEWER's browser, so it is a DETERRENCE +
+ * TRACE fence, not real security. A technically skilled user can still bypass it
+ * (disabling JS, using a phone camera, screen-recording software outside the browser,
+ * OBS, virtual machines...). The layers that carry real legal/technical value are:
+ *   1) an identifying watermark drawn straight into the canvas & into the PDF -> traces who leaked it
+ *   2) never sending the original DWG file down to the client
+ *   3) logging every violation back to the server
+ * Those three points are what should be emphasized when advising a client.
  */
 (function (global) {
   'use strict';
 
-  /* Tất cả các lớp dưới đây LUÔN BẬT — không có công tắc tắt từ giao diện. */
+  /* All layers below are ALWAYS ON — there is no off switch in the UI. */
   var CFG = {
     blockDevtoolsKeys: true,
     blockContextMenu: true,
@@ -22,12 +22,12 @@
     blockPrint: true,
     blockSave: true,
     printScreenGuard: true,
-    wipeOnFocus: true,          // phá clipboard mỗi khi trang lấy lại focus (bắt Snipping Tool)
-    wipeLines: [],              // các dòng định danh in lên ảnh cảnh báo
+    wipeOnFocus: true,          // wipe the clipboard whenever the page regains focus (catches Snipping Tool)
+    wipeLines: [],              // identifying lines printed onto the warning image
     detectDevtools: true,
-    onViolation: null,          // function(type, detail) — nơi cắm API ghi log audit
-    onDevtools: null,           // function(open) — báo mở/đóng DevTools để ẩn/hiện bản vẽ
-    onWipe: null                // function(ok) — báo mỗi lần phá clipboard THÀNH/BẠI
+    onViolation: null,          // function(type, detail) — hook point for the audit logging API
+    onDevtools: null,           // function(open) — reports DevTools open/close to hide/show the drawing
+    onWipe: null                // function(ok) — reports each clipboard wipe as SUCCESS/FAILURE
   };
 
   var doc = global.document;
@@ -37,7 +37,7 @@
     try { if (CFG.onViolation) CFG.onViolation(type, detail || ''); } catch (e) { }
   }
 
-  /* ---------- toast cảnh báo ---------- */
+  /* ---------- warning toast ---------- */
   function toast(msg, kind) {
     var el = doc.getElementById('drm-toast');
     if (!el) {
@@ -51,7 +51,7 @@
     toastTimer = setTimeout(function () { el.className = ''; }, 3200);
   }
 
-  /* ---------- màn che nội dung ---------- */
+  /* ---------- content shield ---------- */
   function shield(on, msg) {
     if (!shieldEl) {
       shieldEl = doc.createElement('div');
@@ -64,56 +64,58 @@
         '<h3></h3><p></p></div>';
       doc.body.appendChild(shieldEl);
     }
-    shieldEl.querySelector('h3').textContent = 'Nội dung đã được che';
+    shieldEl.querySelector('h3').textContent = 'Content has been hidden';
     shieldEl.querySelector('p').textContent = msg || '';
     doc.documentElement.classList.toggle('drm-shielded', !!on);
   }
 
-  /* ---------- 1. Phím tắt devtools / xem nguồn / lưu / in ---------- */
+  /* ---------- 1. Devtools / view-source / save / print shortcuts ---------- */
   function onKeyDown(ev) {
     var k = (ev.key || '').toLowerCase();
     var ctrl = ev.ctrlKey || ev.metaKey;
 
     if (CFG.blockDevtoolsKeys) {
-      if (ev.key === 'F12') { stop(ev); toast('Phím F12 (DevTools) đã bị chặn.'); violate('F12'); return; }
+      if (ev.key === 'F12') { stop(ev); toast('The F12 (DevTools) key has been blocked.'); violate('F12'); return; }
       if (ctrl && ev.shiftKey && ['i', 'j', 'c', 'k', 'e'].indexOf(k) >= 0) {
-        stop(ev); toast('Tổ hợp mở DevTools đã bị chặn.'); violate('devtools-key', 'Ctrl+Shift+' + k.toUpperCase()); return;
+        stop(ev); toast('The DevTools shortcut has been blocked.'); violate('devtools-key', 'Ctrl+Shift+' + k.toUpperCase()); return;
       }
-      if (ctrl && k === 'u') { stop(ev); toast('Xem mã nguồn đã bị chặn.'); violate('view-source'); return; }
+      if (ctrl && k === 'u') { stop(ev); toast('View source has been blocked.'); violate('view-source'); return; }
     }
     if (CFG.blockPrint && ctrl && k === 'p') {
-      stop(ev); toast('Chức năng In đã bị vô hiệu hoá cho tài liệu này.', 'block'); violate('print-shortcut'); return;
+      stop(ev); toast('Printing has been disabled for this document.', 'block'); violate('print-shortcut'); return;
     }
     if (CFG.blockSave && ctrl && k === 's') {
-      stop(ev); toast('Lưu trang đã bị chặn. Dùng nút "Xuất PDF có watermark".'); violate('save-page'); return;
+      stop(ev); toast('Saving the page has been blocked. Use the "Export watermarked PDF" button.'); violate('save-page'); return;
     }
-    /* PrintScreen (phím ghi "Print Screen / SysRq").
-       KHÔNG chặn được việc chụp: OS chụp ảnh ở tầng dưới trình duyệt rồi mới (đôi khi)
-       gửi phím xuống, nên preventDefault() không còn gì để huỷ. Thứ duy nhất làm được
-       là PHÁ ảnh ngay sau khi nó vào clipboard + ghi nhật ký.
+    /* PrintScreen (the "Print Screen / SysRq" key).
+       The capture itself CANNOT be blocked: the OS grabs the screenshot at a layer
+       below the browser and then (sometimes) sends the key down, so preventDefault()
+       has nothing left to cancel. The only thing achievable is to DESTROY the image
+       right after it enters the clipboard + log it.
 
-       Mỗi nền tảng gửi một kiểu KHÁC NHAU, đây là chỗ dễ sai nhất:
-         Windows + Chrome/Edge : CHỈ có keyup, KHÔNG hề có keydown
-         Linux/X11             : có cả keydown lẫn keyup
-         GNOME/KDE, macOS      : desktop nuốt phím, trang không nhận được gì
-       Vì vậy phải bắt ở CẢ HAI chiều rồi khử trùng lặp. Bắt mỗi keydown thì trên
-       Windows toàn bộ lớp này im lặng — không toast, không nhoè, người dùng tưởng
-       hệ thống không hoạt động. */
+       Each platform sends a DIFFERENT kind of event, and this is the easiest place to
+       get wrong:
+         Windows + Chrome/Edge : ONLY keyup, NO keydown at all
+         Linux/X11             : both keydown and keyup
+         GNOME/KDE, macOS      : the desktop swallows the key, the page receives nothing
+       That is why we must catch on BOTH directions and then de-duplicate. Catching only
+       keydown makes this whole layer silent on Windows — no toast, no blur, and the user
+       thinks the system is not working. */
     if (CFG.printScreenGuard && isPrintScreen(ev)) {
       handlePrintScreen('keydown');
       stop(ev);
       return;
     }
-    /* Win + Shift + S (Snipping Tool) — bắt được phần phím, phần chụp do OS xử lý.
-       Ảnh chỉ vào clipboard lúc người dùng quét xong, xử lý ở onFocusBack(). */
+    /* Win + Shift + S (Snipping Tool) — we catch the key part, the OS handles the capture.
+       The image only enters the clipboard once the user finishes the selection, handled in onFocusBack(). */
     if (CFG.printScreenGuard && ev.shiftKey && (ev.metaKey || ev.key === 'Meta') && k === 's') {
       flashBlur();
-      toast('Phát hiện công cụ cắt màn hình — thao tác đã được ghi nhận.', 'block');
+      toast('Screen-clipping tool detected — this action has been logged.', 'block');
       violate('snipping-tool');
     }
   }
   function onKeyUp(ev) {
-    /* Trên Windows đây là đường DUY NHẤT chạy — keydown không bao giờ tới. */
+    /* On Windows this is the ONLY path that runs — keydown never arrives. */
     if (CFG.printScreenGuard && isPrintScreen(ev)) {
       handlePrintScreen('keyup');
       stop(ev);
@@ -123,11 +125,12 @@
 
   function isPrintScreen(ev) {
     return ev.key === 'PrintScreen' || ev.code === 'PrintScreen' ||
-           ev.keyCode === 44 || ev.which === 44;   // trình duyệt cũ chỉ có mã phím
+           ev.keyCode === 44 || ev.which === 44;   // older browsers only expose the key code
   }
 
-  /* Nơi nào gửi cả keydown lẫn keyup thì đó vẫn là MỘT lần bấm: phải ra một dòng
-     nhật ký, không phải hai. Cũng chặn luôn trường hợp giữ phím gây lặp keydown. */
+  /* When a platform sends both keydown and keyup, it is still ONE keypress: it must
+     produce a single log line, not two. This also blocks the case where holding the key
+     repeats keydown. */
   var lastPS = 0;
   function handlePrintScreen(src) {
     var now = Date.now();
@@ -135,13 +138,14 @@
     lastPS = now;
     wipeBurst();
     flashBlur();
-    toast('Ảnh chụp màn hình đã bị vô hiệu hoá. Thao tác được ghi nhật ký.', 'block');
+    toast('Screenshot has been disabled. This action has been logged.', 'block');
     violate('printscreen', src);
   }
 
-  /* ---------- phá clipboard ----------
-     Bắn nhiều nhịp vì Windows đôi khi đẩy ảnh vào clipboard trễ hơn sự kiện phím
-     vài chục mili-giây; ghi đè một lần như trước là bỏ lọt. */
+  /* ---------- clipboard wipe ----------
+     Fire several bursts because Windows sometimes pushes the image into the clipboard
+     a few dozen milliseconds later than the key event; overwriting only once, as before,
+     misses it. */
   var wipeTimers = [];
   function wipeBurst() {
     wipeTimers.forEach(clearTimeout);
@@ -150,8 +154,9 @@
     });
   }
 
-  /* Ảnh cảnh báo dán đè lên ảnh vừa chụp. Ghi ẢNH chứ không chỉ ghi text, để khi dán
-     vào Paint / Word người dùng nhận được tấm cảnh báo này thay vì bản vẽ. */
+  /* A warning image pasted over the screenshot just taken. We write an IMAGE, not just
+     text, so that when the user pastes into Paint / Word they get this warning card
+     instead of the drawing. */
   var warnBlob = null;
   function warningImage() {
     if (warnBlob) return Promise.resolve(warnBlob);
@@ -166,12 +171,12 @@
       g.textAlign = 'center';
       g.fillStyle = '#e5484d';
       g.font = '700 58px "Segoe UI", Arial, sans-serif';
-      g.fillText('ẢNH CHỤP ĐÃ BỊ VÔ HIỆU HOÁ', c.width / 2, 240);
+      g.fillText('SCREENSHOT HAS BEEN DISABLED', c.width / 2, 240);
 
       g.fillStyle = '#dbe3f0';
       g.font = '400 25px "Segoe UI", Arial, sans-serif';
-      g.fillText('Bản vẽ này thuộc tài liệu kiểm soát.', c.width / 2, 305);
-      g.fillText('Hành vi chụp màn hình đã được ghi nhật ký kèm định danh của bạn.', c.width / 2, 345);
+      g.fillText('This drawing is part of a controlled document.', c.width / 2, 305);
+      g.fillText('The screenshot attempt has been logged along with your identity.', c.width / 2, 345);
 
       g.fillStyle = '#8b97ad';
       g.font = '400 21px "Cascadia Mono", Consolas, monospace';
@@ -186,19 +191,21 @@
     });
   }
 
-  /* Báo kết quả một lần phá clipboard. ok=false nghĩa là KHÔNG ghi được clipboard
-     (mất quyền / trình duyệt chặn) -> lớp chống chụp màn hình coi như đã CHẾT, app
-     cần ẩn bản vẽ ngay thay vì tưởng vẫn an toàn. */
+  /* Report the result of one clipboard wipe. ok=false means the clipboard could NOT be
+     written (permission lost / browser blocked it) -> the anti-screenshot layer is
+     considered DEAD, and the app must hide the drawing immediately instead of assuming
+     it is still safe. */
   function wipeReport(ok) { try { if (CFG.onWipe) CFG.onWipe(!!ok); } catch (e) { } }
 
-  var selfCopy = false;   // cho phép execCommand('copy') của chính mình đi qua
+  var selfCopy = false;   // allow our own execCommand('copy') to pass through
   function wipeClipboard() {
-    /* Ghi clipboard chỉ được phép khi document đang focus. Nếu trang KHÔNG focus (vd
-       nhịp trễ của burst chạy sau khi người dùng đã rời tab) thì bỏ qua — đừng báo
-       thất bại, vì đó là lỗi "not focused" chứ không phải mất quyền. */
+    /* Writing the clipboard is only allowed while the document is focused. If the page is
+       NOT focused (e.g. a delayed burst nibble running after the user has already left the
+       tab) then skip it — do not report failure, because that is a "not focused" error, not
+       a lost permission. */
     if (doc.hasFocus && !doc.hasFocus()) return;
-    var note = '[' + (CFG.wipeNote || 'Anh chup bi vo hieu hoa boi he thong phan phoi ban ve') + ']';
-    /* Ghi đồng thời ảnh + text: mọi định dạng cũ trong clipboard bị thay sạch. */
+    var note = '[' + (CFG.wipeNote || 'Screenshot has been disabled by the drawing distribution system') + ']';
+    /* Write image + text at the same time: every previous format in the clipboard is wiped clean. */
     if (navigator.clipboard && navigator.clipboard.write && global.ClipboardItem) {
       warningImage().then(function (img) {
         return navigator.clipboard.write([new global.ClipboardItem({
@@ -206,7 +213,7 @@
           'text/plain': new Blob([note], { type: 'text/plain' })
         })]);
       }).then(function () { wipeReport(true); })
-        .catch(function () { wipeText(note); });   // wipeText tự báo kết quả của nó
+        .catch(function () { wipeText(note); });   // wipeText reports its own result
       return;
     }
     wipeText(note);
@@ -228,24 +235,25 @@
       ta.style.cssText = 'position:fixed;opacity:0;left:-9999px';
       doc.body.appendChild(ta); ta.select();
       selfCopy = true;
-      ok = doc.execCommand('copy');     // false nếu trình duyệt chặn
+      ok = doc.execCommand('copy');     // false if the browser blocks it
       selfCopy = false;
       doc.body.removeChild(ta);
     } catch (e) { selfCopy = false; ok = false; }
-    /* Đây là đường CUỐI: nếu cả nó cũng hỏng thì clipboard thực sự không ghi được. */
+    /* This is the LAST resort: if even this fails, the clipboard truly cannot be written. */
     wipeReport(ok);
   }
 
-  /* Quay lại trang sau khi rời đi = thời điểm duy nhất bắt được Snipping Tool /
-     Win+Shift+S, vì ảnh chỉ vào clipboard khi người dùng quét xong.
-     Đánh đổi: clipboard của người dùng bị xoá mỗi lần quay lại tab. Tắt bằng
-     wipeOnFocus: false nếu thấy phiền. */
+  /* Returning to the page after leaving = the only moment we can catch the Snipping Tool /
+     Win+Shift+S, because the image only enters the clipboard once the user finishes the
+     selection.
+     Trade-off: the user's clipboard is wiped every time they come back to the tab. Turn it
+     off with wipeOnFocus: false if it becomes annoying. */
   function onFocusBack() {
     if (!CFG.printScreenGuard || !CFG.wipeOnFocus) return;
     wipeBurst();
   }
 
-  /* nhoè nhanh 1 nhịp để ảnh chụp (nếu lọt) không đọc được nét */
+  /* a quick one-shot blur so a screenshot (if it slips through) cannot read the lines */
   var flashTimer = null;
   function flashBlur() {
     doc.documentElement.classList.add('drm-flash');
@@ -255,22 +263,22 @@
     }, 1400);
   }
 
-  /* ---------- 2. Chuột phải / kéo thả / bôi đen ---------- */
+  /* ---------- 2. Right-click / drag-and-drop / text selection ---------- */
   function onContextMenu(ev) {
     if (!CFG.blockContextMenu) return;
     stop(ev);
-    toast('Menu chuột phải đã bị vô hiệu hoá.');
+    toast('Right-click menu is disabled.');
     violate('contextmenu');
   }
 
-  /* ---------- 3. In ấn ---------- */
+  /* ---------- 3. Printing ---------- */
   function onBeforePrint() {
     if (!CFG.blockPrint) return;
     violate('print-dialog');
-    toast('Tài liệu này không được phép in trực tiếp.', 'block');
+    toast('This document may not be printed directly.', 'block');
   }
 
-  /* ---------- 4. Dò DevTools (heuristic kích thước cửa sổ) ---------- */
+  /* ---------- 4. DevTools detection (window-size heuristic) ---------- */
   var dtOpen = false;
   function detectDevtools() {
     if (!CFG.detectDevtools) return;
@@ -279,10 +287,10 @@
     var open = wGap > 165 || hGap > 165;
     if (open !== dtOpen) {
       dtOpen = open;
-      /* Báo cho app ẩn/hiện bản vẽ ở tầng canvas (không chỉ blur lớp phủ). */
+      /* Tell the app to hide/show the drawing at the canvas layer (not just blur the overlay). */
       try { if (CFG.onDevtools) CFG.onDevtools(open); } catch (e) { }
       if (open) {
-        shield(true, 'Phát hiện công cụ phát triển (DevTools) đang mở. Đóng DevTools để xem lại bản vẽ.');
+        shield(true, 'Developer tools (DevTools) detected as open. Close DevTools to view the drawing again.');
         violate('devtools-open', 'gap ' + wGap + 'x' + hGap);
       } else {
         shield(false);
@@ -290,7 +298,7 @@
     }
   }
 
-  /* ---------- khởi tạo ---------- */
+  /* ---------- initialization ---------- */
   function init(cfg) {
     Object.assign(CFG, cfg || {});
 
@@ -299,9 +307,9 @@
     doc.addEventListener('contextmenu', onContextMenu, true);
     doc.addEventListener('dragstart', function (ev) { stop(ev); }, true);
     doc.addEventListener('copy', function (ev) {
-      if (selfCopy) return;                 // thao tác ghi đè clipboard của chính DRM
+      if (selfCopy) return;                 // DRM's own clipboard-overwrite action
       if (!CFG.blockSelection) return;
-      stop(ev); toast('Sao chép nội dung đã bị chặn.'); violate('copy');
+      stop(ev); toast('Copying content has been blocked.'); violate('copy');
     }, true);
     if (CFG.blockSelection) doc.documentElement.classList.add('drm-noselect');
 
@@ -316,8 +324,8 @@
     detectDevtools();
 
     try {
-      console.log('%cDỪNG LẠI', 'color:#e5484d;font:700 42px system-ui');
-      console.log('%cĐây là khu vực dành cho lập trình viên. Mọi thao tác trên tài liệu này đều được ghi nhật ký kèm định danh người dùng.',
+      console.log('%cSTOP', 'color:#e5484d;font:700 42px system-ui');
+      console.log('%cThis is a developer-only area. Every action on this document is logged along with the user\'s identity.',
         'color:#c9d1d9;font:14px system-ui');
     } catch (e) { }
 

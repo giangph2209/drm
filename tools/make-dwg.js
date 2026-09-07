@@ -1,23 +1,23 @@
 /*
- * make-dwg.js — Sinh file DWG mẫu và nhúng vào web.
+ * make-dwg.js — Generate the sample DWG file and embed it into the web app.
  *
- *   node tools/gen-dxf.js     ->  sample/_build.dxf   (DXF R12 trung gian)
+ *   node tools/gen-dxf.js     ->  sample/_build.dxf   (intermediate DXF R12)
  *   node tools/make-dwg.js    ->  sample/MB-CH-A0102.dwg + data/drawing.js
  *
- * PHẢI QUA HAI BƯỚC. Chuyển thẳng DXF R12 -> DWG bằng `dxf2dwg` cho ra file hỏng
- * (đọc lại báo `bit_read_TV buffer overflow`, mất sạch entity, chỉ còn bảng layer).
- * Nguyên nhân: DXF R12 tối giản thiếu BLOCK_RECORD, OBJECTS và handle mà bộ ghi DWG cần.
- * Cho `dxfwrite` chuẩn hoá thành DXF R2000 đầy đủ trước rồi mới `dxf2dwg` thì ra file
- * hợp lệ, giữ nguyên 251 entity và 9 layer.
+ * TWO STEPS ARE REQUIRED. Converting DXF R12 directly to DWG with `dxf2dwg` produces a corrupt
+ * file (reading it back reports `bit_read_TV buffer overflow`, all entities lost, only the layer
+ * table remains). The cause: a minimal DXF R12 lacks the BLOCK_RECORD, OBJECTS and handles that
+ * the DWG writer needs. Having `dxfwrite` normalize it to a full DXF R2000 first, then `dxf2dwg`,
+ * yields a valid file that keeps all 251 entities and 9 layers.
  *
- *   DXF R12  ──dxfwrite──►  DXF R2000 đầy đủ  ──dxf2dwg──►  DWG (AC1015)
+ *   DXF R12  ──dxfwrite──►  full DXF R2000  ──dxf2dwg──►  DWG (AC1015)
  *
- * Cần bộ nhị phân GNU LibreDWG. Tải bản Windows tại:
+ * Requires the GNU LibreDWG binaries. Download the Windows build at:
  *   https://github.com/LibreDWG/libredwg/releases   (libredwg-<ver>-win64.zip)
- * rồi trỏ biến môi trường LIBREDWG_BIN tới thư mục chứa dxfwrite.exe / dxf2dwg.exe,
- * hoặc đặt chúng vào PATH.
+ * then point the LIBREDWG_BIN environment variable at the folder containing dxfwrite.exe /
+ * dxf2dwg.exe, or place them on PATH.
  *
- * Chỉ cần chạy lại khi sửa bản vẽ mẫu. File DWG sinh ra đã có sẵn trong repo.
+ * Only needs to be re-run when the sample drawing changes. The generated DWG is already in the repo.
  */
 const fs = require('fs');
 const path = require('path');
@@ -37,43 +37,43 @@ function run(name, args) {
     return execFileSync(tool(name), args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
     if (e.code === 'ENOENT') {
-      console.error('\nKhông tìm thấy ' + name + EXE + '.');
-      console.error('Tải GNU LibreDWG bản Windows rồi đặt LIBREDWG_BIN trỏ tới thư mục chứa nó:');
+      console.error('\nCould not find ' + name + EXE + '.');
+      console.error('Download the Windows build of GNU LibreDWG and set LIBREDWG_BIN to its folder:');
       console.error('  https://github.com/LibreDWG/libredwg/releases');
-      console.error('  set LIBREDWG_BIN=C:\\duong\\dan\\libredwg\n');
+      console.error('  set LIBREDWG_BIN=C:\\path\\to\\libredwg\n');
       process.exit(1);
     }
-    /* LibreDWG hay ghi cảnh báo ra stderr rồi vẫn trả mã khác 0 — cứ đi tiếp,
-       bước kiểm tra ở cuối sẽ bắt lỗi thật. */
+    /* LibreDWG often writes warnings to stderr yet still returns a non-zero code — keep going;
+       the verification step at the end will catch real errors. */
     return (e.stdout || '') + (e.stderr || '');
   }
 }
 
 const srcDxf = path.join(ROOT, 'sample', '_build.dxf');
 if (!fs.existsSync(srcDxf)) {
-  console.error('Chưa có ' + srcDxf + '. Chạy trước: node tools/gen-dxf.js');
+  console.error(srcDxf + ' does not exist yet. Run first: node tools/gen-dxf.js');
   process.exit(1);
 }
 
 const tmpDxf = path.join(os.tmpdir(), 'drm-normalised-' + process.pid + '.dxf');
 const outDwg = path.join(ROOT, 'sample', 'MB-CH-A0102.dwg');
 
-console.log('1/3  chuẩn hoá DXF R12 -> DXF R2000 đầy đủ (dxfwrite)');
+console.log('1/3  normalize DXF R12 -> full DXF R2000 (dxfwrite)');
 run('dxfwrite', ['--as', 'r2000', '-y', '-o', tmpDxf, srcDxf]);
-if (!fs.existsSync(tmpDxf)) { console.error('dxfwrite không tạo được file.'); process.exit(1); }
+if (!fs.existsSync(tmpDxf)) { console.error('dxfwrite failed to create the file.'); process.exit(1); }
 
 console.log('2/3  DXF R2000 -> DWG AC1015 (dxf2dwg)');
 run('dxf2dwg', ['--as', 'r2000', '-y', '-o', outDwg, tmpDxf]);
 fs.unlinkSync(tmpDxf);
-if (!fs.existsSync(outDwg)) { console.error('dxf2dwg không tạo được file.'); process.exit(1); }
+if (!fs.existsSync(outDwg)) { console.error('dxf2dwg failed to create the file.'); process.exit(1); }
 
 const dwg = fs.readFileSync(outDwg);
 const sig = dwg.slice(0, 6).toString('ascii');
-if (!/^AC10\d\d$/.test(sig)) { console.error('File tạo ra không phải DWG hợp lệ: ' + sig); process.exit(1); }
+if (!/^AC10\d\d$/.test(sig)) { console.error('The generated file is not a valid DWG: ' + sig); process.exit(1); }
 
-console.log('3/3  nhúng DWG vào data/drawing.js (base64)');
-const js = '/* Bản vẽ DWG nhúng sẵn — sinh tự động bởi tools/make-dwg.js. KHÔNG sửa tay.\n' +
-  '   Nguồn: sample/MB-CH-A0102.dwg (' + sig + ', ' + dwg.length + ' bytes) */\n' +
+console.log('3/3  embed the DWG into data/drawing.js (base64)');
+const js = '/* Embedded DWG drawing — auto-generated by tools/make-dwg.js. DO NOT edit by hand.\n' +
+  '   Source: sample/MB-CH-A0102.dwg (' + sig + ', ' + dwg.length + ' bytes) */\n' +
   'window.EMBEDDED_DWG = "' + dwg.toString('base64') + '";\n';
 fs.writeFileSync(path.join(ROOT, 'data', 'drawing.js'), js, 'utf8');
 

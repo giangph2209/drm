@@ -1,351 +1,359 @@
-# DRM Drawing Portal — Demo phân phối bản vẽ có kiểm soát
+# DRM Drawing Portal — Demo for controlled drawing distribution
 
-Website tĩnh (HTML + JS thuần, **không framework, không build, không backend**).
-Cần chạy qua một HTTP server bất kỳ vì có dùng WebAssembly.
+A static website (plain HTML + JS, **no framework, no build, no backend**).
+It must be served over an HTTP server of any kind because it uses WebAssembly.
 
 ```
 index.html
 css/style.css
-js/dxf-parser.js     bộ đọc DXF tự viết (LINE, ARC, CIRCLE, TEXT, MTEXT, SOLID,
-                     LWPOLYLINE, POLYLINE, ELLIPSE, INSERT + bung BLOCK)
-js/viewer.js         render canvas 2D: pan/zoom, layer, linetype, watermark, thước tỷ lệ
-js/export-pdf.js     kết xuất PDF VECTOR + watermark + cờ cấm in
-js/drm.js            lớp chặn F12 / in / PrintScreen / chuột phải / DevTools
-js/app.js            ghép mọi thứ
-js/dwg-loader.js     đọc file DWG nhị phân bằng LibreDWG biên dịch WebAssembly
-js/vendor/jspdf.umd.min.js   jsPDF 2.5.1 (đã tải sẵn — chạy offline)
-js/vendor/libredwg/  GNU LibreDWG bản WASM (~10 MB) — GPL-3.0, xem cảnh báo bên dưới
-data/drawing.js      bản vẽ DWG mặc định, nhúng dạng base64 — KHÔNG gọi mạng
-sample/MB-CH-A0102.dwg       chính bản vẽ đó, mở được bằng AutoCAD/BricsCAD
-sample/sample_2018.dwg       DWG thật của AutoCAD 2018, để thử định dạng đời mới
-tools/gen-dxf.js     sinh hình học bản vẽ ra DXF trung gian
-tools/make-dwg.js    DXF trung gian -> DWG + nhúng vào data/drawing.js
-tools/test-parse.js  kiểm thử: đọc thẳng file DWG rồi kiểm tra số liệu
-tools/key-probe.html trang đo: trình duyệt thật sự nhận được sự kiện gì khi bấm phím
+js/dxf-parser.js     hand-written DXF reader (LINE, ARC, CIRCLE, TEXT, MTEXT, SOLID,
+                     LWPOLYLINE, POLYLINE, ELLIPSE, INSERT + BLOCK expansion)
+js/viewer.js         2D canvas render: pan/zoom, layer, linetype, watermark, scale bar
+js/export-pdf.js     VECTOR PDF export + watermark + no-print flag
+js/drm.js            blocking layer for F12 / print / PrintScreen / right-click / DevTools
+js/app.js            wires everything together
+js/dwg-loader.js     reads binary DWG files via LibreDWG compiled to WebAssembly
+js/vendor/jspdf.umd.min.js   jsPDF 2.5.1 (bundled — runs offline)
+js/vendor/libredwg/  GNU LibreDWG WASM build (~10 MB) — GPL-3.0, see the warning below
+data/drawing.js      the default DWG drawing, embedded as base64 — NO network calls
+sample/MB-CH-A0102.dwg       that same drawing, openable in AutoCAD/BricsCAD
+sample/sample_2018.dwg       a real AutoCAD 2018 DWG, to test a newer format
+tools/gen-dxf.js     generates the drawing geometry into an intermediate DXF
+tools/make-dwg.js    intermediate DXF -> DWG + embeds it into data/drawing.js
+tools/test-parse.js  test: reads the DWG file directly, then verifies the data
+tools/key-probe.html probe page: what keyboard events does the browser actually receive?
 ```
 
-## Chạy
+## Running
 
 ```
-npx serve .        # hoặc: python -m http.server 8080
+npx serve .        # or: python -m http.server 8080
 ```
 
-**Bắt buộc chạy qua HTTP.** Mở `index.html` bằng `file://` sẽ không hoạt động: bản vẽ mặc
-định cũng là DWG nên cần WebAssembly, mà trình duyệt chặn WASM và ES module qua giao thức
-`file://`.
+**Must be served over HTTP.** Opening `index.html` via `file://` will not work: the default
+drawing is a DWG too, so it needs WebAssembly, and browsers block WASM and ES modules over the
+`file://` protocol.
 
 ---
 
-## Chỉ đọc DWG
+## DWG-only
 
-**Hệ thống chỉ làm việc với file DWG nhị phân.** Không có đường DXF nào lộ ra giao diện.
+**The system works only with binary DWG files.** No DXF path is ever exposed in the UI.
 
-- Bản vẽ mặc định là `sample/MB-CH-A0102.dwg` (AutoCAD 2000), nhúng sẵn dạng base64 trong
-  `data/drawing.js` — không gọi mạng, không upload.
-- Bấm **"Mở bản vẽ DWG"** hoặc kéo thả để mở file `.dwg` khác. Đọc tại máy bằng
-  `FileReader`, **không gửi đi đâu cả**.
+- The default drawing is `sample/MB-CH-A0102.dwg` (AutoCAD 2000), embedded as base64 in
+  `data/drawing.js` — no network calls, no uploads.
+- Click **"Open DWG drawing"** or drag and drop to open a different `.dwg` file. It is read
+  locally with `FileReader`, **and never sent anywhere**.
 
-Cơ chế: GNU LibreDWG biên dịch sang WebAssembly (`@mlightcad/libredwg-web`, đã tải sẵn vào
+Mechanism: GNU LibreDWG compiled to WebAssembly (`@mlightcad/libredwg-web`, bundled into
 `js/vendor/libredwg/`).
 
 ```
-file .dwg  ──►  WASM LibreDWG  ──►  DXF trong bộ nhớ  ──►  parse  ──►  canvas
- (nhị phân)     ~10 MB, nạp 1 lần    (trung gian, không lộ ra ngoài)
+.dwg file  ──►  WASM LibreDWG  ──►  DXF in memory  ──►  parse  ──►  canvas
+ (binary)       ~10 MB, loaded once   (intermediate, never exposed)
 ```
 
-DXF vẫn còn trong mã nguồn nhưng chỉ là **định dạng trung gian trong bộ nhớ** — LibreDWG
-xuất DXF, `js/dxf-parser.js` đọc DXF đó. Người dùng không bao giờ thấy hay chạm vào nó.
+DXF still exists in the source, but only as an **in-memory intermediate format** — LibreDWG
+emits DXF and `js/dxf-parser.js` reads that DXF. The user never sees or touches it.
 
-Đã kiểm chứng bằng file DWG thật:
+Verified against real DWG files:
 
-| File | Phiên bản | Kết quả |
+| File | Version | Result |
 |---|---|---|
-| `sample/MB-CH-A0102.dwg` | AutoCAD 2000 (AC1015) | 251 đối tượng, 9 layer |
-| `sample/sample_2018.dwg` | AutoCAD 2018 (AC1032) | 6 đối tượng, 2 layer, 22 ms |
+| `sample/MB-CH-A0102.dwg` | AutoCAD 2000 (AC1015) | 251 entities, 9 layers |
+| `sample/sample_2018.dwg` | AutoCAD 2018 (AC1032) | 6 entities, 2 layers, 22 ms |
 
-> **Phải chạy qua HTTP** (`npx serve .`). Mở bằng `file://` thì trình duyệt chặn
-> WebAssembly và ES module, ứng dụng sẽ báo lỗi kèm hướng dẫn.
+> **Must be served over HTTP** (`npx serve .`). Opened via `file://`, the browser blocks
+> WebAssembly and ES modules, and the app reports an error with instructions.
 
-### Tạo lại file DWG mẫu
+### Regenerating the sample DWG file
 
 ```
-node tools/gen-dxf.js     # hình học -> sample/_build.dxf (DXF R12 trung gian)
+node tools/gen-dxf.js     # geometry -> sample/_build.dxf (intermediate DXF R12)
 node tools/make-dwg.js    # -> sample/MB-CH-A0102.dwg + data/drawing.js
 ```
 
-`make-dwg.js` cần bộ nhị phân GNU LibreDWG — tải bản Windows ở
-[github.com/LibreDWG/libredwg/releases](https://github.com/LibreDWG/libredwg/releases) rồi
-đặt `LIBREDWG_BIN` trỏ tới thư mục chứa `dxfwrite.exe` / `dxf2dwg.exe`. Chỉ cần chạy lại khi
-sửa bản vẽ mẫu; file DWG sinh ra đã có sẵn trong repo.
+`make-dwg.js` needs the GNU LibreDWG binaries — download the Windows build from
+[github.com/LibreDWG/libredwg/releases](https://github.com/LibreDWG/libredwg/releases) and
+point `LIBREDWG_BIN` at the directory containing `dxfwrite.exe` / `dxf2dwg.exe`. You only need
+to run it again when you edit the sample drawing; the generated DWG file is already in the repo.
 
-**Bắt buộc hai bước.** Chuyển thẳng DXF R12 sang DWG bằng `dxf2dwg` cho ra **file hỏng**:
-đọc lại báo `bit_read_TV buffer overflow`, mất sạch entity, chỉ còn bảng layer. Nguyên nhân
-là DXF R12 tối giản thiếu `BLOCK_RECORD`, section `OBJECTS` và handle mà bộ ghi DWG cần.
-Cho `dxfwrite` chuẩn hoá lên DXF R2000 đầy đủ trước rồi mới `dxf2dwg` thì ra file hợp lệ,
-giữ nguyên 251 đối tượng và 9 layer.
+**Two steps are required.** Converting intermediate DXF R12 straight to DWG with `dxf2dwg`
+produces a **corrupt file**: reading it back reports `bit_read_TV buffer overflow`, all entities
+are lost, and only the layer table remains. The cause is that minimal DXF R12 lacks the
+`BLOCK_RECORD`, the `OBJECTS` section, and the handles the DWG writer needs. Letting `dxfwrite`
+normalize it up to a full DXF R2000 first, then running `dxf2dwg`, produces a valid file that
+keeps all 251 entities and 9 layers.
 
-### Hai lỗi của LibreDWG bản WASM đã phải vá
+### Two bugs in the WASM build of LibreDWG that had to be patched
 
-Bản WASM (`@mlightcad/libredwg-web` 0.7.10) gói một phiên bản LibreDWG cũ, xuất DXF sai ở
-hai chỗ. Cả hai đều làm bản vẽ hiển thị hỏng, đã vá trong `js/dxf-parser.js`:
+The WASM build (`@mlightcad/libredwg-web` 0.7.10) bundles an old version of LibreDWG that emits
+DXF incorrectly in two places. Both make the drawing render broken; both are patched in
+`js/dxf-parser.js`:
 
-1. **Ghi `62 = -7` cho mọi layer.** Trong DXF, group 62 mang dấu âm nghĩa là layer đang
-   **tắt** — nên bản vẽ mở ra trắng trơn. Kiểm chứng bằng `dwglayers` thì trong file DWG
-   mọi layer đều đang bật, và bản native `dwg2dxf` ghi đúng số dương. Cách vá: không bản vẽ
-   thật nào tắt sạch toàn bộ layer, nên gặp trường hợp đó thì bỏ qua cờ tắt.
-2. **Ghi điểm căn lề `11/21 = 0,0`** kể cả khi không dùng tới, làm mọi chữ có căn lề dồn hết
-   về gốc toạ độ. Cách vá: chỉ tin điểm căn lề khi nó thực sự mang giá trị.
+1. **Writes `62 = -7` for every layer.** In DXF, a negative group 62 means the layer is
+   **off** — so the drawing opens blank. Verified with `dwglayers`: in the DWG file every layer
+   is actually on, and the native `dwg2dxf` writes the correct positive number. The fix: no real
+   drawing turns off every single layer, so when that happens, the off flag is ignored.
+2. **Writes the alignment point `11/21 = 0,0`** even when it is unused, making every aligned text
+   pile up at the origin. The fix: only trust the alignment point when it actually carries a value.
 
-Ngoài ra đường DXF → DWG **làm mất group 72** (căn lề ngang). Vì bản phát hành cuối là DWG
-nên `tools/gen-dxf.js` tự tính sẵn toạ độ căn giữa/căn phải rồi chỉ xuất chữ căn trái —
-nhờ vậy không phụ thuộc vào group 72 nữa.
+Beyond that, the DXF → DWG path **loses group 72** (horizontal alignment). Since the final
+deliverable is DWG, `tools/gen-dxf.js` pre-computes the center/right-aligned coordinates itself
+and only emits left-aligned text — so it no longer depends on group 72.
 
-### CẢNH BÁO BẢN QUYỀN — đọc trước khi báo giá
+### LICENSING WARNING — read before quoting a price
 
-**LibreDWG là GPL-3.0.** Nhúng nó vào một sản phẩm thương mại đóng mã nguồn sẽ kéo theo
-nghĩa vụ GPL cho **toàn bộ sản phẩm** (phải công khai mã nguồn). Với một sản phẩm DRM bán
-cho khách thì đây thường là điều không chấp nhận được.
+**LibreDWG is GPL-3.0.** Embedding it in a closed-source commercial product drags GPL
+obligations onto **the entire product** (you must publish the source). For a DRM product sold to
+customers, that is usually unacceptable.
 
-Nó hoàn toàn ổn cho **demo nội bộ và thẩm định kỹ thuật** — mục đích của repo này. Khi làm
-thật thì phải thay bằng một trong các lựa chọn sau:
+It is perfectly fine for **internal demos and technical due diligence** — the purpose of this
+repo. For a real product it must be replaced with one of the following options:
 
-| Giải pháp | Hình thức | Ghi chú |
+| Solution | Form | Notes |
 |---|---|---|
-| **ODA SDK** (Open Design Alliance) | license thương mại, ~1.200 USD/năm trở lên | chuẩn công nghiệp, có cả bản web/WASM |
-| **Autodesk Platform Services** | đám mây, trả tiền theo lượt convert | file phải đẩy lên server Autodesk |
-| **ODA File Converter** chạy ở server | binary miễn phí | **phải đọc kỹ điều khoản dùng thương mại** |
+| **ODA SDK** (Open Design Alliance) | commercial license, ~1,200 USD/year and up | industry standard, includes web/WASM builds |
+| **Autodesk Platform Services** | cloud, pay per conversion | files must be pushed to Autodesk servers |
+| **ODA File Converter** running on a server | free binary | **read the commercial-use terms carefully** |
 
-Lưu ý ghi DWG khó hơn đọc nhiều: `dxf2dwg` của LibreDWG chỉ ghi được tới r2004 và đã có
-lỗi như mô tả ở trên. Hệ thống thật không cần ghi DWG — khách upload DWG của họ, hệ thống
-chỉ **đọc**; khi cho tải về thì xuất PDF có watermark chứ không trả lại DWG.
+Note that writing DWG is much harder than reading it: LibreDWG's `dxf2dwg` only writes up to
+r2004 and has the bugs described above. A real system does not need to write DWG — customers
+upload their own DWG, the system only **reads** it; when downloads are allowed it exports a
+watermarked PDF rather than handing back a DWG.
 
 ---
 
-## Đã làm được gì
+## What it does
 
-### Xem — không sửa, không xoá
-- **Mở file DWG từ máy** (nút trên thanh trên, hoặc kéo thả) — đọc tại chỗ, không upload
-- Pan (kéo chuột), zoom (lăn chuột tại con trỏ), pinch trên cảm ứng, nút "Vừa khung" / phím `F`
-- Bật/tắt từng layer; 4 **layout** dựng sẵn (A3 đầy đủ / Model / Kiến trúc không nội thất / Trục & kích thước)
-- Thước tỷ lệ, lưới nền, hiển thị toạ độ theo con trỏ
-- **Chỉ đọc thật sự:** sau khi parse, toàn bộ cây dữ liệu bị `Object.freeze` đệ quy.
-  Không có hàm nào trong code có thể ghi/xoá entity. Chuỗi DWG base64 gốc bị `delete` khỏi
-  `window` ngay sau khi giải mã, để không lấy lại được file gốc từ console.
+### View — no editing, no deleting
+- **Open a DWG file from disk** (button on the top bar, or drag and drop) — read locally, no upload
+- Pan (drag), zoom (wheel at the cursor), pinch on touch, "Fit to frame" button / the `F` key
+- Toggle individual layers; 4 preset **layouts** (full A3 / Model / Architecture without interior / Axes & dimensions)
+- Scale bar, background grid, cursor coordinate readout
+- **Truly read-only:** after parsing, the entire data tree is recursively `Object.freeze`d.
+  No function in the code can write or delete an entity. The original base64 DWG string is
+  `delete`d from `window` right after it is decoded, so the original file cannot be recovered
+  from the console.
 
-### Watermark trên màn hình
-Vẽ **thẳng vào canvas** trong vòng lặp render, không phải lớp `<div>` CSS phủ lên trên.
-Hệ quả: không thể xoá bằng DevTools (xoá DOM không ảnh hưởng gì), và **luôn có mặt trong
-mọi ảnh chụp màn hình**. Nội dung watermark lấy từ hồ sơ người đang đăng nhập (tên, số điện
-thoại, thời điểm, mã phiên) — bật cố định, giao diện không có chỗ tắt hay chỉnh.
+### On-screen watermark
+Drawn **directly onto the canvas** inside the render loop, not a CSS `<div>` overlay on top.
+The consequence: it cannot be removed via DevTools (deleting the DOM has no effect), and it is
+**always present in every screenshot**. The watermark content comes from the logged-in user's
+profile (name, phone number, timestamp, session code) — permanently on, with no UI to turn it
+off or adjust it.
 
-### Xuất PDF có watermark
-- Kết xuất lại **dạng vector** (không phải ảnh raster) → nét sắc ở mọi mức zoom, file ~15 KB
-- Khổ A4 / A3 / A2, chế độ đen trắng (in ấn) hoặc giữ màu layer
-- Watermark lát chéo toàn trang: tên + số điện thoại + thời điểm + **mã tra vết**
-- Chân trang: ai tải, lúc nào, mã bản vẽ, layout, mã tra vết
-- Tên file chứa luôn mã tra vết: `KT-02-A0102_nguyenvanan_FBDD-42DA.pdf`
-- **Cờ cấm in / cấm sao chép** ở cấp tài liệu PDF (owner password) — đặt cố định cho mọi
-  bản xuất, không có tuỳ chọn tắt. Acrobat và hầu hết trình đọc sẽ khoá nút In và khoá copy text.
+### Watermarked PDF export
+- Re-rendered **as vector** (not a raster image) → crisp at any zoom level, ~15 KB file
+- A4 / A3 / A2 sizes, black-and-white mode (for printing) or keep the layer colors
+- Diagonal tiled watermark across the whole page: name + phone number + timestamp + **trace code**
+- Footer: who downloaded it, when, drawing code, layout, trace code
+- The filename includes the trace code: `KT-02-A0102_johnsmith_FBDD-42DA.pdf`
+- **No-print / no-copy flags** at the PDF document level (owner password) — fixed for every
+  export, with no option to turn them off. Acrobat and most readers will disable the Print
+  button and lock text copying.
 
-Watermark và cờ cấm in là **chính sách cố định**, không phải tuỳ chọn — hộp thoại xuất chỉ
-còn khổ giấy, chế độ màu, và phạm vi layer.
+The watermark and no-print flags are **fixed policy**, not options — the export dialog only offers
+paper size, color mode, and layer scope.
 
-### Chặn thao tác
-| Hành vi | Cách chặn |
+### Blocking interactions
+| Behavior | How it is blocked |
 |---|---|
 | F12, Ctrl+Shift+I/J/C/K, Ctrl+U | `keydown` capture, `preventDefault` |
-| Ctrl+P (in) | chặn phím + `beforeprint` + `@media print` thay toàn trang bằng cảnh báo |
-| Ctrl+S (lưu trang) | chặn phím |
-| Chuột phải | chặn `contextmenu` (không cho "Lưu ảnh", "Kiểm tra phần tử") |
-| Bôi đen / copy | `user-select: none` + chặn sự kiện `copy` |
-| Kéo thả ảnh | chặn `dragstart` |
-| **Print Screen** | phá clipboard (xem mục dưới) + nhoè màn hình 1 nhịp |
-| DevTools đang mở | heuristic chênh lệch `outerWidth/innerWidth` → che nội dung |
+| Ctrl+P (print) | key block + `beforeprint` + `@media print` replaces the whole page with a warning |
+| Ctrl+S (save page) | key block |
+| Right-click | blocks `contextmenu` (no "Save image", "Inspect element") |
+| Select / copy | `user-select: none` + blocks the `copy` event |
+| Image drag | blocks `dragstart` |
+| **Print Screen** | destroys the clipboard (see below) + a one-frame screen blur |
+| DevTools open | `outerWidth/innerWidth` gap heuristic → hides the content |
 
-Dòng in đậm là **phản ứng sau khi ảnh đã bị chụp**, không ngăn được việc chụp — xem mục
-"Nói thẳng với khách hàng" bên dưới. Muốn chặn thật thì phải chạy bản Desktop.
+The bold rows are **reactions after the image has already been captured**, they cannot prevent the
+capture — see "Being straight with the customer" below. To block it for real you need the Desktop build.
 
-#### Phá clipboard sau khi bị chụp
+#### Destroying the clipboard after a capture
 
-Không vô hiệu hoá được phím PrtSc, nhưng huỷ được tấm ảnh nó vừa tạo ra. Cơ chế trong
+You cannot disable the PrtSc key, but you can destroy the image it just created. The mechanism in
 `js/drm.js`:
 
-- **Ghi đè bằng ẢNH, không phải text.** Dán đè một tấm PNG cảnh báo có in sẵn mã bản vẽ,
-  tên + email người xem, mã phiên và thời điểm. Người dùng dán vào Paint / Word sẽ nhận
-  được tấm cảnh báo mang chính danh tính của họ thay vì bản vẽ.
-- **Bắn nhiều nhịp** (0 / 60 / 180 / 400 / 900 ms). Windows đôi khi đẩy ảnh vào clipboard
-  trễ hơn sự kiện phím vài chục mili-giây; ghi đè một lần là bỏ lọt.
-- **Phá lại mỗi khi trang lấy lại focus.** Đây là cách duy nhất bắt được `Win+Shift+S` /
-  Snipping Tool, vì ảnh chỉ vào clipboard lúc người dùng quét xong — khi đó trang mới lấy
-  lại focus. Đánh đổi: clipboard của người dùng bị xoá mỗi lần quay lại tab. Muốn bỏ thì
-  đặt `wipeOnFocus: false`.
+- **Overwrite with an IMAGE, not text.** Paste over it a warning PNG pre-printed with the drawing
+  code, the viewer's name + email, session code, and timestamp. A user who pastes into Paint / Word
+  gets the warning image bearing their own identity instead of the drawing.
+- **Fire several times** (0 / 60 / 180 / 400 / 900 ms). Windows sometimes pushes the image into the
+  clipboard a few tens of milliseconds after the key event; overwriting once would miss it.
+- **Destroy it again every time the page regains focus.** This is the only way to catch
+  `Win+Shift+S` / Snipping Tool, because the image only enters the clipboard when the user finishes
+  selecting — at which point the page regains focus. The trade-off: the user's clipboard is wiped
+  every time they return to the tab. To disable it, set `wipeOnFocus: false`.
 
-Đã kiểm chứng bằng Chrome thật: đặt sẵn một ảnh 3 KB vào clipboard, bấm PrtSc, đọc lại
-clipboard thì ảnh cũ đã bị thay bằng tấm cảnh báo 72 KB kèm dòng text định danh. Mô phỏng
-Snipping Tool (mất focus rồi quay lại) cũng cho kết quả tương tự.
+Verified in real Chrome: place a 3 KB image on the clipboard, press PrtSc, read the clipboard back,
+and the old image has been replaced with a 72 KB warning image plus an identifying text line.
+Simulating the Snipping Tool (losing focus then returning) gives the same result.
 
-**Giới hạn:** `navigator.clipboard.write()` đòi trang phải đang được focus, và một số phiên
-bản Chrome còn đòi có tương tác gần đây. Nếu bị từ chối thì code tự lùi về ghi text, rồi
-lùi tiếp về `execCommand('copy')`. Trường hợp xấu nhất là ảnh chụp sống sót — nhưng nó vẫn
-mang watermark định danh phủ kín.
+**Limitation:** `navigator.clipboard.write()` requires the page to be focused, and some Chrome
+versions also require recent interaction. If it is denied, the code falls back to writing text, then
+falls back further to `execCommand('copy')`. The worst case is that the screenshot survives — but it
+still carries the identifying watermark covering it entirely.
 
-Mỗi lần vi phạm đều được ghi vào **nhật ký ở sidebar** kèm mốc thời gian.
-Trong hệ thống thật, chỗ này là `POST /api/audit`.
+Every violation is written to the **log in the sidebar** with a timestamp.
+In a real system, this is where `POST /api/audit` would go.
 
-Tất cả các lớp trên **bật cố định**, không có công tắc tắt trong giao diện. Sidebar chỉ
-liệt kê trạng thái để người xem biết tài liệu đang được bảo vệ bằng những gì.
-
----
-
-## Nói thẳng với khách hàng về giới hạn
-
-Đây là phần quan trọng nhất, đừng bỏ qua khi tư vấn.
-
-**1. Mọi thứ trong `drm.js` chạy trên máy người xem, nên đều vượt được.**
-Tắt JavaScript, chạy trình duyệt ở chế độ debug, dùng extension, hoặc đơn giản là
-**chụp bằng điện thoại** — không có cách nào chặn. Đây là hàng rào *răn đe*, giống như
-khoá cửa: ngăn người tử tế làm bậy vì tiện tay, không ngăn được người cố tình.
-
-**2. Trên web, KHÔNG chặn được chụp màn hình. Điểm này cần nói rõ ràng.**
-
-Windows chụp ảnh ở tầng hệ điều hành: khi bấm `Win+Shift+S` hay `PrintScreen`, OS đóng
-băng framebuffer **ngay tại thời điểm bấm phím**, rồi mới gửi sự kiện phím xuống ứng dụng.
-Trình duyệt nhận được `keydown` thì ảnh đã nằm trong bộ nhớ từ trước. JavaScript luôn chạy
-**sau** khi ảnh đã bị chụp — không có Web API nào thay đổi được thứ tự này.
-
-Những gì bản web làm được chỉ là *phản ứng sau*: ghi đè clipboard, nhoè màn hình một nhịp,
-và **ghi vết**. Ảnh vẫn ra — nhưng ảnh đó mang đầy đủ watermark định danh, nên vẫn truy
-được nguồn.
-
-Muốn chặn thật thì phải dùng **bản Desktop** (xem mục dưới). OBS, ShareX, phần mềm họp
-trực tuyến, máy ảo, card capture — bản web đều không biết. Camera điện thoại thì **cả hai
-bản đều không chặn được**.
-
-**3. Watermark trong DWG không có tác dụng.**
-Như đã xác nhận: watermark đóng vào DWG chỉ là entity nằm trên một layer. Người nhận mở
-bằng AutoCAD là tắt layer / xoá / `COPYCLIP` sang file mới — mất sạch trong 5 giây, không
-cần kỹ năng gì. **Không có cơ chế nào bảo vệ được DWG**, vì bản chất nó là định dạng dữ
-liệu mở cho phần mềm CAD chỉnh sửa.
-
-→ Kết luận cho mục "cho tải file về": **chỉ cho tải PDF đã convert + đóng watermark**.
-Nếu khách vẫn muốn tải DWG gốc thì phải chấp nhận là từ thời điểm đó file nằm ngoài
-tầm kiểm soát — nên xử lý bằng hợp đồng/NDA chứ không phải bằng kỹ thuật.
-
-**4. Cờ cấm in trong PDF là răn đe, không phải mã hoá.**
-Chuẩn PDF quy định trình đọc *nên* tôn trọng cờ này; Acrobat, Foxit, Chrome đều tôn trọng.
-Nhưng công cụ chuyên dụng gỡ được trong vài giây. Muốn chặn thật thì phải mã hoá nội dung
-và ép người xem dùng trình đọc riêng (Adobe LiveCycle / FileOpen / Vitrium) — đắt, phiền,
-và khách đã nói **không cần mã hoá file**.
+All of the layers above are **permanently on**, with no off switch in the UI. The sidebar only lists
+the status so the viewer knows what is protecting the document.
 
 ---
 
-## Bảng chốt phương án để đưa khách quyết định
+## Being straight with the customer about the limits
 
-| | Web (trình duyệt) | Desktop (Electron) |
+This is the most important part — do not skip it when advising.
+
+**1. Everything in `drm.js` runs on the viewer's machine, so all of it can be bypassed.**
+Turn off JavaScript, run the browser in debug mode, use an extension, or simply **take a photo with a
+phone** — there is no way to block it. This is a *deterrent* fence, like a door lock: it stops honest
+people from misbehaving out of convenience, not someone who is determined.
+
+**2. On the web, screen capture CANNOT be blocked. This point must be stated clearly.**
+
+Windows captures the image at the operating-system layer: when you press `Win+Shift+S` or
+`PrintScreen`, the OS freezes the framebuffer **at the very moment the key is pressed**, and only then
+sends the key event down to the application. By the time the browser receives `keydown`, the image is
+already in memory. JavaScript always runs **after** the image has been captured — no Web API can change
+this ordering.
+
+What the web build can do is only *react afterward*: overwrite the clipboard, blur the screen for one
+frame, and **leave a trace**. The image still comes out — but that image carries the full identifying
+watermark, so it can still be traced back.
+
+To block it for real you need the **Desktop build** (see below). OBS, ShareX, online-meeting software,
+virtual machines, capture cards — the web build knows about none of them. A phone camera **neither build
+can block**.
+
+**3. Watermarking inside the DWG is useless.**
+As confirmed: a watermark baked into a DWG is just an entity on a layer. The recipient opens it in
+AutoCAD and turns off the layer / deletes it / `COPYCLIP`s to a new file — gone in 5 seconds, no skill
+required. **Nothing can protect a DWG**, because it is fundamentally an open data format meant to be
+edited by CAD software.
+
+→ Conclusion for the "allow file download" feature: **only allow downloading the converted + watermarked
+PDF**. If the customer still wants to download the original DWG, they must accept that from that moment the
+file is beyond their control — so handle it with a contract/NDA, not with technology.
+
+**4. The PDF no-print flag is a deterrent, not encryption.**
+The PDF standard says readers *should* respect this flag; Acrobat, Foxit, and Chrome all do. But a
+dedicated tool removes it in seconds. To block it for real you must encrypt the content and force viewers
+to use a proprietary reader (Adobe LiveCycle / FileOpen / Vitrium) — expensive, cumbersome, and the
+customer already said they **do not need file encryption**.
+
+---
+
+## Decision table to put in front of the customer
+
+| | Web (browser) | Desktop (Electron) |
 |---|---|---|
-| Cài đặt cho người xem | không cần, mở link là xem | phải cài app |
-| Xem trên điện thoại / máy khách | được | không |
-| Cập nhật phiên bản | tức thì | phải phát hành bản mới |
-| Chặn F12 / chuột phải / Ctrl+P | có (tầng JS, vượt được) | có (**tầng native**, không vượt được) |
-| **PrintScreen** | ❌ chụp được | ✅ **ảnh ra đen** |
-| **Snipping Tool / Win+Shift+S** | ❌ chụp được | ✅ **ảnh ra đen** |
-| **OBS / ShareX / quay màn hình** | ❌ quay được | ✅ **ảnh ra đen** |
-| **Teams / Zoom / TeamViewer share** | ❌ thấy được | ✅ **ảnh ra đen** |
-| Camera điện thoại | ❌ | ❌ **cả hai đều chịu** |
-| Watermark định danh + truy vết | ✅ | ✅ |
+| Install for the viewer | none, open a link and view | must install an app |
+| View on phone / client's machine | yes | no |
+| Version updates | instant | must ship a new build |
+| Block F12 / right-click / Ctrl+P | yes (JS layer, bypassable) | yes (**native layer**, not bypassable) |
+| **PrintScreen** | ❌ captures | ✅ **image comes out black** |
+| **Snipping Tool / Win+Shift+S** | ❌ captures | ✅ **image comes out black** |
+| **OBS / ShareX / screen recording** | ❌ records | ✅ **image comes out black** |
+| **Teams / Zoom / TeamViewer share** | ❌ visible | ✅ **image comes out black** |
+| Phone camera | ❌ | ❌ **both are helpless** |
+| Identifying watermark + tracing | ✅ | ✅ |
 
-Khách đã chốt **"web"** ngay từ đầu, nhưng lại yêu cầu **"chống chụp màn hình"**. Hai điều
-này mâu thuẫn nhau về mặt kỹ thuật. Cần đưa lại bảng trên để khách chọn một trong hai:
+The customer settled on **"web"** from the start, but also asked for **"screenshot protection"**. These
+two are technically contradictory. Put the table above back in front of them and have them choose one of
+the two:
 
-- **Giữ web** → chấp nhận chụp được, đổi lại luôn truy được ai làm rò rỉ. Chi phí thấp,
-  triển khai nhanh, người xem không phải cài gì.
-- **Chuyển desktop** → chặn chụp thật, nhưng người xem phải cài app và chỉ dùng được trên
-  máy tính. Nhà thầu / tư vấn ngoài công ty thường ngại cài.
+- **Keep web** → accept that captures are possible, in exchange for always being able to trace who leaked
+  it. Low cost, fast to deploy, viewers install nothing.
+- **Switch to desktop** → real capture blocking, but viewers must install an app and can only use it on a
+  computer. Contractors / outside consultants are often reluctant to install.
 
-Phương án hay dùng trong thực tế: **web cho xem thường, desktop cho bản vẽ mật**. Cùng một
-bộ mã nguồn, chỉ khác lớp vỏ — đúng như repo này đang tổ chức.
-
----
-
-## Giá trị thật của hệ thống nằm ở đâu
-
-Ba điểm dưới đây mới là thứ nên bán, và cả ba đều đã có trong demo:
-
-1. **File gốc không bao giờ rời server.** Client chỉ nhận hình học đã convert. Đây là lớp
-   bảo vệ duy nhất không vượt được, vì nó không phụ thuộc vào máy người dùng.
-2. **Watermark định danh + mã tra vết**, có trên cả màn hình lẫn PDF tải về. Bản rò rỉ
-   xuất hiện ở đâu cũng truy ngược được về đúng tài khoản đã tải. Đây là thứ thực sự
-   khiến người ta không dám phát tán.
-3. **Nhật ký truy vết đầy đủ** — ai xem, xem lúc nào, tải mấy lần, có cố mở DevTools không.
-   Có bằng chứng để xử lý khi có sự cố.
-
-Nói cách khác: **không ngăn được rò rỉ, nhưng luôn biết rò rỉ từ đâu ra.** Với bản vẽ kỹ
-thuật thì đó là mức bảo vệ hợp lý về chi phí.
+The approach commonly used in practice: **web for ordinary viewing, desktop for confidential drawings.**
+Same source code, only a different shell — exactly how this repo is organized.
 
 ---
 
-## Nếu sau này cần chặn chụp màn hình thật
+## Where the real value of the system lies
 
-Repo này **chỉ còn bản web**. Vỏ Electron đã dựng trước đó bị gỡ bỏ theo quyết định đi
-hướng web. Ghi lại đây để khỏi phải tìm lại nếu khách đổi ý.
+The three points below are what should actually be sold, and all three are already in the demo:
 
-Chặn chụp màn hình chỉ làm được ở **ứng dụng desktop**, bằng đúng một dòng:
+1. **The original file never leaves the server.** The client only receives converted geometry. This is
+   the one protection layer that cannot be bypassed, because it does not depend on the user's machine.
+2. **Identifying watermark + trace code**, present both on screen and in the downloaded PDF. Wherever a
+   leaked copy shows up, it traces back to the exact account that downloaded it. This is what really makes
+   people afraid to distribute it.
+3. **A full audit log** — who viewed it, when, how many times they downloaded, whether they tried to open
+   DevTools. There is evidence to act on when an incident occurs.
+
+In other words: **you cannot prevent leaks, but you always know where the leak came from.** For
+engineering drawings, that is a reasonable level of protection for the cost.
+
+---
+
+## If real screenshot blocking is needed later
+
+This repo is now **web-only**. The Electron shell that was built earlier was removed following the
+decision to go web. Recorded here so it need not be rediscovered if the customer changes their mind.
+
+Blocking screen capture is only possible in a **desktop application**, with exactly one line:
 
 ```js
 win.setContentProtection(true);   // Electron BrowserWindow
 ```
 
-Electron gọi xuống API của hệ điều hành:
+Electron calls down into the operating-system API:
 
-| HĐH | API | Yêu cầu |
+| OS | API | Requires |
 |---|---|---|
 | Windows | `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` | Win 10 build 2004+ |
 | macOS | `NSWindow.sharingType = NSWindowSharingNone` | — |
 
-Từ lúc đó cửa sổ biến mất khỏi mọi cơ chế chụp/quay của OS: PrintScreen, Snipping Tool,
-`Win+Shift+S`, OBS, ShareX, Teams / Zoom share, TeamViewer — tất cả chỉ thu được vùng đen.
-**Trang web không bao giờ gọi được API này.**
+From then on the window disappears from every OS capture/recording mechanism: PrintScreen, Snipping Tool,
+`Win+Shift+S`, OBS, ShareX, Teams / Zoom share, TeamViewer — all of them capture only a black region.
+**A web page can never call this API.**
 
-Bọc lại chỉ mất khoảng nửa tiếng: giữ nguyên toàn bộ mã web hiện tại, thêm `main.js` +
-`preload.js`, bật `setContentProtection`, chặn phím ở tầng native bằng `before-input-event`,
-tắt DevTools bằng `webPreferences: { devTools: false }`.
+Wrapping it takes about half an hour: keep all the current web code, add `main.js` + `preload.js`, enable
+`setContentProtection`, block keys at the native layer with `before-input-event`, and disable DevTools with
+`webPreferences: { devTools: false }`.
 
 ---
 
-## Khoảng cách từ demo tới sản phẩm
+## The gap from demo to product
 
-| Hạng mục | Demo | Sản phẩm thật |
+| Item | Demo | Real product |
 |---|---|---|
-| Nguồn bản vẽ | nhúng sẵn 1 file | upload + convert DWG→DXF/SVG ở server |
-| Người dùng | cứng trong `app.js` | SSO / phân quyền theo dự án, theo bản vẽ |
-| Ghi log | mảng trong RAM | `POST /api/audit`, lưu DB, dashboard cảnh báo |
-| Watermark | render ở client | render ở **server** (client không tắt được) |
-| Xuất PDF | tạo ở trình duyệt | tạo ở server, đóng dấu số, cấp link hết hạn |
-| Hiệu năng | ~250 entity | bản vẽ thật 50k–500k entity → cần WebGL hoặc tile ảnh |
+| Drawing source | 1 embedded file | upload + convert DWG→DXF/SVG on the server |
+| Users | hard-coded in `app.js` | SSO / permissions per project, per drawing |
+| Logging | array in RAM | `POST /api/audit`, stored in a DB, alert dashboard |
+| Watermark | rendered on the client | rendered on the **server** (the client cannot turn it off) |
+| PDF export | generated in the browser | generated on the server, digitally stamped, expiring links |
+| Performance | ~250 entities | real drawings of 50k–500k entities → need WebGL or image tiling |
 
-Điểm cần lưu ý nhất khi báo giá: **watermark và kết xuất PDF phải chuyển về server**.
-Làm ở client thì về nguyên tắc người dùng vẫn can thiệp được vào mã JS đang chạy; chuyển
-lên server thì watermark nằm ngoài tầm với của họ hoàn toàn.
+The most important point when quoting: **the watermark and PDF rendering must move to the server**. Done on
+the client, the user can in principle still tamper with the running JS; moved to the server, the watermark is
+completely out of their reach.
 
 ---
 
-## Kiểm thử
+## Testing
 
 ```
-node tools/test-parse.js   # đọc thẳng sample/MB-CH-A0102.dwg qua WASM
+node tools/test-parse.js   # reads sample/MB-CH-A0102.dwg directly via WASM
 ```
 
-Bài kiểm tra đọc file DWG bằng đúng bộ LibreDWG mà web dùng, rồi xác nhận: 251/251 đối
-tượng, 9/9 layer, không có số liệu hỏng, **không layer nào bị coi là tắt**, và **nhãn trục
-không bị dồn về gốc toạ độ** — hai điều kiện sau chính là hai lỗi WASM đã vá ở trên.
+The test reads the DWG file with the exact LibreDWG build the web app uses, then confirms: 251/251
+entities, 9/9 layers, no corrupt data, **no layer treated as off**, and **axis labels not piled at the
+origin** — the last two conditions are exactly the two WASM bugs patched above.
 
-Đã chạy smoke test bằng Playwright + Chrome thật, hai kịch bản:
+A smoke test was run with Playwright + real Chrome, in two scenarios:
 
-1. **Bản vẽ DWG mặc định** — giải mã base64, đọc qua WASM, render canvas, bật/tắt layer,
-   đổi layout, chặn F12 / Ctrl+P / chuột phải, xuất PDF rồi mở lại bằng pdf.js (1 trang A3,
-   đúng cờ `/Encrypt`).
-2. **Mở file DWG khác** — nạp `sample/sample_2018.dwg` (AutoCAD 2018) qua WASM: 6 đối
-   tượng, 2 layer, 22 ms; layout tự chuyển sang "Toàn bộ bản vẽ"; watermark vẫn phủ lên bản
-   vẽ mới; xuất được PDF có cờ cấm in; DRM vẫn chặn F12.
+1. **The default DWG drawing** — decode base64, read via WASM, render the canvas, toggle layers, switch
+   layouts, block F12 / Ctrl+P / right-click, export a PDF and reopen it with pdf.js (1 A3 page, correct
+   `/Encrypt` flag).
+2. **Open a different DWG file** — load `sample/sample_2018.dwg` (AutoCAD 2018) via WASM: 6 entities,
+   2 layers, 22 ms; the layout switches automatically to "Entire drawing"; the watermark still covers the
+   new drawing; a PDF with the no-print flag exports successfully; DRM still blocks F12.
 
-Không có lỗi JavaScript ở cả hai kịch bản.
+No JavaScript errors in either scenario.

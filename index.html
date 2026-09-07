@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
-    <title>Cổng phân phối bản vẽ — MB-CH-A0102</title>
+    <title>Drawing Distribution Portal — MB-CH-A0102</title>
     <meta name="robots" content="noindex, nofollow, noarchive, noimageindex" />
     <link
       rel="icon"
@@ -16,7 +16,7 @@
   </head>
   <body>
     <div class="app">
-      <!-- ============ THANH TRÊN ============ -->
+      <!-- ============ TOP BAR ============ -->
       <header class="topbar">
 
         <div class="doc-chip">
@@ -29,7 +29,7 @@
 
         <div class="spacer"></div>
 
-        <button class="btn" id="btn-fit" title="Vừa màn hình (F)">
+        <button class="btn" id="btn-fit" title="Fit to screen (F)">
           <svg
             viewBox="0 0 24 24"
             width="15"
@@ -40,7 +40,7 @@
           >
             <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
           </svg>
-          Vừa khung
+          Fit
         </button>
         <button class="btn primary" id="btn-export">
           <svg
@@ -55,75 +55,75 @@
               d="M12 3v11m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
             />
           </svg>
-          Xuất PDF có watermark
+          Export watermarked PDF
         </button>
 
         <div class="user">
-          <div class="avatar" id="ava">NA</div>
+          <div class="avatar" id="ava">JS</div>
           <div class="user-meta">
-            <b id="u-name">Nguyễn Văn An</b>
-            <span id="u-role">Nhà thầu M&amp;E · Quyền: XEM + TẢI PDF</span>
+            <b id="u-name">John Smith</b>
+            <span id="u-role">M&amp;E Contractor · Access: VIEW + DOWNLOAD PDF</span>
           </div>
         </div>
       </header>
 
-      <!-- ============ VÙNG VẼ ============ -->
+      <!-- ============ DRAWING AREA ============ -->
       <main class="main">
         <canvas id="cad"></canvas>
 
         <div class="overlay ov-tl">
-          <div class="t">MẶT BẰNG BỐ TRÍ NỘI THẤT</div>
+          <div class="t">INTERIOR LAYOUT PLAN</div>
           <div class="s">
-            Tỷ lệ 1/100 · Đơn vị: mm · <span id="ent-count">—</span> đối tượng
+            Scale 1/100 · Units: mm · <span id="ent-count">—</span> objects
           </div>
         </div>
 
         <div class="overlay ov-tr">
-          <div class="lbl">Bản sao kiểm soát cấp cho</div>
-          <div class="v" id="ov-user">nguyenvanan@nhathau-me.vn</div>
-          <div class="lbl" style="margin-top: 5px">Mã phiên xem</div>
+          <div class="lbl">Controlled copy issued to</div>
+          <div class="v" id="ov-user">john.smith@demo-construction.com</div>
+          <div class="lbl" style="margin-top: 5px">Viewing session ID</div>
           <div class="v" id="ov-session">—</div>
         </div>
 
         <div class="overlay ov-br" id="ov-coord">X: — &nbsp; Y: —</div>
 
         <div id="busy" hidden></div>
-        <div class="dropzone"><span>Thả file DWG vào đây</span></div>
+        <div class="dropzone"><span>Drop DWG file here</span></div>
 
         <div class="toolbar">
-          <button class="btn" id="t-zin" title="Phóng to">＋</button>
-          <button class="btn" id="t-zout" title="Thu nhỏ">－</button>
-          <button class="btn" id="t-fit" title="Vừa khung">Vừa khung</button>
+          <button class="btn" id="t-zin" title="Zoom in">＋</button>
+          <button class="btn" id="t-zout" title="Zoom out">－</button>
+          <button class="btn" id="t-fit" title="Fit">Fit</button>
           <div class="div"></div>
-          <button class="btn" id="t-grid" title="Bật/tắt lưới">Lưới</button>
+          <button class="btn" id="t-grid" title="Toggle grid">Grid</button>
         </div>
       </main>
 
-      <!-- ============ TRẠNG THÁI ============ -->
+      <!-- ============ STATUS ============ -->
       <footer class="status">
         <span class="dot"></span>
-        <span><b>Phiên bảo vệ đang hoạt động</b></span>
-        <span>File đọc tại máy — không upload lên server</span>
-        <span>Nguồn: <span id="st-format">—</span> · <span id="st-size">—</span></span>
+        <span><b>Protection session active</b></span>
+        <span>File read locally — not uploaded to any server</span>
+        <span>Source: <span id="st-format">—</span> · <span id="st-size">—</span></span>
         <div class="spacer" style="flex: 1"></div>
-        <span>Vi phạm ghi nhận: <span id="log-count">0</span></span>
+        <span>Violations recorded: <span id="log-count">0</span></span>
       </footer>
     </div>
 
-    <!-- ============ MODAL XUẤT PDF ============ -->
+    <!-- ============ PDF EXPORT MODAL ============ -->
     <div class="modal-bg" id="modal">
       <div class="modal">
         <h3>
-          Xuất PDF có watermark
+          Export watermarked PDF
           <span
-            >Bản vẽ được kết xuất lại dạng vector kèm định danh người tải. File
-            DWG gốc không bao giờ rời hệ thống.</span
+            >The drawing is re-rendered as vectors with the downloader's identity
+            embedded. The original DWG file never leaves the system.</span
           >
         </h3>
         <div class="body">
           <div class="row">
             <div>
-              <label class="cap">Khổ giấy</label>
+              <label class="cap">Paper size</label>
               <div class="seg" id="seg-paper">
                 <button data-v="a4">A4</button>
                 <button data-v="a3" class="on">A3</button>
@@ -131,25 +131,25 @@
               </div>
             </div>
             <div>
-              <label class="cap">Chế độ màu</label>
+              <label class="cap">Color mode</label>
               <div class="seg" id="seg-mode">
-                <button data-v="bw" class="on">Đen trắng</button>
-                <button data-v="color">Giữ màu layer</button>
+                <button data-v="bw" class="on">Black &amp; white</button>
+                <button data-v="color">Keep layer colors</button>
               </div>
             </div>
           </div>
 
           <div class="policy">
-            <b>Mọi bản xuất đều tự động:</b>
-            chỉ kết xuất các layer đang hiển thị, đóng watermark chéo toàn
-            trang (tên người tải · thời điểm · mã tra vết) và đặt cờ cấm in /
-            cấm sao chép ở cấp tài liệu PDF.
+            <b>Every export automatically:</b>
+            renders only the currently visible layers, stamps a full-page
+            diagonal watermark (downloader name · timestamp · trace code) and
+            sets no-printing / no-copying flags at the PDF document level.
           </div>
 
         </div>
         <div class="foot">
-          <button class="btn ghost" id="x-cancel">Huỷ</button>
-          <button class="btn primary" id="x-go">Kết xuất &amp; tải về</button>
+          <button class="btn ghost" id="x-cancel">Cancel</button>
+          <button class="btn primary" id="x-go">Render &amp; download</button>
         </div>
       </div>
     </div>

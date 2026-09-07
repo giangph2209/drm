@@ -1,13 +1,13 @@
 /*
- * dxf-parser.js — Bộ đọc DXF tối giản, đủ dùng cho bản vẽ 2D kỹ thuật.
- * Hỗ trợ: LINE, CIRCLE, ARC, TEXT/MTEXT, POINT, SOLID, LWPOLYLINE, POLYLINE/VERTEX,
- *         ELLIPSE, INSERT (bung block, có scale/rotate), bảng LAYER + LTYPE.
- * Không hỗ trợ ghi/sửa — viewer chỉ đọc.
+ * dxf-parser.js — A minimal DXF reader, sufficient for 2D engineering drawings.
+ * Supports: LINE, CIRCLE, ARC, TEXT/MTEXT, POINT, SOLID, LWPOLYLINE, POLYLINE/VERTEX,
+ *           ELLIPSE, INSERT (block expansion, with scale/rotate), LAYER + LTYPE tables.
+ * No write/edit support — the viewer is read-only.
  */
 (function (global) {
   'use strict';
 
-  /* --- Bảng màu AutoCAD Color Index (ACI) --- */
+  /* --- AutoCAD Color Index (ACI) palette --- */
   var ACI = {
     0: '#ffffff', 1: '#ff0000', 2: '#ffff00', 3: '#00ff00', 4: '#00ffff',
     5: '#0055ff', 6: '#ff00ff', 7: '#ffffff', 8: '#808080', 9: '#c0c0c0',
@@ -32,12 +32,12 @@
     return '#' + f(r) + f(g) + f(b);
   }
 
-  /* --- tách file thành cặp (code, value) --- */
+  /* --- split the file into (code, value) pairs --- */
   function tokenize(txt) {
     var raw = txt.split(/\r\n|\r|\n/), out = [];
     for (var i = 0; i + 1 < raw.length; i += 2) {
       var c = parseInt(raw[i], 10);
-      if (isNaN(c)) { i -= 1; continue; }          // tự đồng bộ lại nếu lệch dòng
+      if (isNaN(c)) { i -= 1; continue; }          // re-synchronize if the lines are misaligned
       out.push({ c: c, v: raw[i + 1] });
     }
     return out;
@@ -45,7 +45,7 @@
 
   var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
 
-  /* --- gom các cặp của 1 thực thể thành map: {code: [values]} --- */
+  /* --- gather the pairs of one entity into a map: {code: [values]} --- */
   function grab(tk, i) {
     var m = {};
     while (i < tk.length && tk[i].c !== 0) {
@@ -57,7 +57,7 @@
   var g1 = function (m, c, d) { return m[c] ? m[c][0] : d; };
   var gn = function (m, c, d) { return m[c] ? num(m[c][0]) : (d === undefined ? 0 : d); };
 
-  /* --- dựng entity từ map --- */
+  /* --- build an entity from a map --- */
   function buildEntity(type, m) {
     var base = {
       type: type,
@@ -90,9 +90,10 @@
         var ha = gn(m, 72, 0), va = gn(m, 73, 0);
         var x = gn(m, 10), y = gn(m, 20);
         if ((ha !== 0 || va !== 0) && m[11]) {
-          /* Theo chuẩn DXF, khi có căn lề thì vị trí thật nằm ở 11/21. Nhưng LibreDWG
-             luôn xuất 11/21 = 0,0 kể cả khi không dùng tới, làm mọi chữ dồn về gốc toạ
-             độ. Chỉ tin điểm căn lề khi nó thực sự mang giá trị. */
+          /* Per the DXF standard, when alignment is set the real position lives in 11/21.
+             But LibreDWG always emits 11/21 = 0,0 even when they are unused, which piles all
+             the text at the coordinate origin. Only trust the alignment point when it actually
+             carries a value. */
           var ax = gn(m, 11), ay = gn(m, 21);
           if (ax !== 0 || ay !== 0 || (x === 0 && y === 0)) { x = ax; y = ay; }
         }
@@ -115,7 +116,7 @@
         var xs = m[10] || [], ys = m[20] || [], bs = m[42] || [];
         var p = [];
         for (var j = 0; j < xs.length; j++) p.push({ x: num(xs[j]), y: num(ys[j] || 0), bulge: 0 });
-        // bulge trong LWPOLYLINE bám theo thứ tự đỉnh — xấp xỉ: gán tuần tự
+        // the bulge in LWPOLYLINE follows the vertex order — approximation: assign sequentially
         for (var b = 0; b < bs.length && b < p.length; b++) p[b].bulge = num(bs[b]);
         return Object.assign(base, {
           type: 'POLYLINE', pts: p, closed: (gn(m, 70) & 1) === 1, width: gn(m, 43)
@@ -126,13 +127,13 @@
     }
   }
 
-  /* --- xoay + tịnh tiến 1 điểm --- */
+  /* --- rotate + translate one point --- */
   function xf(p, ins) {
     var c = Math.cos(ins.rot * Math.PI / 180), s = Math.sin(ins.rot * Math.PI / 180);
     var x = p.x * ins.sx, y = p.y * ins.sy;
     return { x: ins.x + x * c - y * s, y: ins.y + x * s + y * c };
   }
-  /* --- áp transform của INSERT lên 1 entity trong block --- */
+  /* --- apply an INSERT transform to one entity inside a block --- */
   function applyInsert(e, ins) {
     var o = Object.assign({}, e);
     var k = (Math.abs(ins.sx) + Math.abs(ins.sy)) / 2;
@@ -167,7 +168,7 @@
     return o;
   }
 
-  /* ============ parse chính ============ */
+  /* ============ main parse ============ */
   function parse(txt) {
     var tk = tokenize(txt);
     var layers = {}, ltypes = {}, blocks = {}, entities = [];
@@ -175,7 +176,7 @@
     var i = 0, section = null;
 
     function readEntityStream(stop, sink, blockName) {
-      /* đọc chuỗi entity đến khi gặp `stop` (ENDSEC / ENDBLK) */
+      /* read the entity stream until we hit `stop` (ENDSEC / ENDBLK) */
       while (i < tk.length) {
         if (tk[i].c !== 0) { i++; continue; }
         var type = tk[i].v;
@@ -267,7 +268,7 @@
       i++;
     }
 
-    /* --- bung INSERT (tối đa 4 cấp lồng nhau) --- */
+    /* --- expand INSERT (up to 4 levels of nesting) --- */
     function expand(list, depth) {
       var out = [];
       list.forEach(function (e) {
@@ -284,19 +285,20 @@
     }
     entities = expand(entities, 0);
 
-    /* --- layer ngầm định cho entity trỏ tới layer chưa khai báo --- */
+    /* --- default layer for entities pointing at an undeclared layer --- */
     entities.forEach(function (e) {
       if (!layers[e.layer]) {
         layers[e.layer] = { name: e.layer, colorIndex: 7, color: '#ffffff', off: false, frozen: false, ltype: 'CONTINUOUS' };
       }
     });
 
-    /* --- vá lỗi bộ chuyển DWG -> DXF ---
-       Trong DXF, group 62 mang dấu âm nghĩa là layer đang TẮT. Bản LibreDWG biên dịch
-       WebAssembly (@mlightcad/libredwg-web) ghi 62 = -7 cho MỌI layer, khiến bản vẽ mở ra
-       trắng trơn — dù `dwglayers` xác nhận trong file DWG mọi layer đều đang bật, và bản
-       native `dwg2dxf` ghi đúng số dương. Không có bản vẽ thật nào tắt sạch toàn bộ layer,
-       nên gặp trường hợp đó thì coi như dữ liệu sai và bỏ qua cờ tắt. */
+    /* --- work around a DWG -> DXF converter bug ---
+       In DXF, a negative sign on group 62 means the layer is OFF. The WebAssembly build of
+       LibreDWG (@mlightcad/libredwg-web) writes 62 = -7 for EVERY layer, which makes the drawing
+       open completely blank — even though `dwglayers` confirms that inside the DWG file every
+       layer is on, and the native `dwg2dxf` writes the correct positive numbers. No real drawing
+       turns off all of its layers, so when we hit that case we treat the data as wrong and ignore
+       the off flag. */
     var names = Object.keys(layers);
     if (names.length > 1 && names.every(function (n) { return layers[n].off; })) {
       names.forEach(function (n) { layers[n].off = false; });
@@ -308,7 +310,7 @@
     };
   }
 
-  /* --- bao hình toàn bản vẽ --- */
+  /* --- bounding box of the whole drawing --- */
   function computeExtents(entities) {
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     function add(x, y) {
