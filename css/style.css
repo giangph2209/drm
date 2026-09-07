@@ -1,0 +1,289 @@
+/* ==========================================================================
+   DRM Drawing Portal — demo giao diện phân phối bản vẽ
+   ========================================================================== */
+:root {
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-2: #eaeef5;
+  --line: #ccd4e2;
+  --line-soft: #dde3ed;
+  --txt: #1b2330;
+  --txt-dim: #55627a;
+  --txt-faint: #7c8899;
+  --acc: #2a7fe0;
+  --acc-soft: rgba(42, 127, 224, .12);
+  --ok: #12996a;
+  --warn: #c07a12;
+  --danger: #d13438;
+
+  /* vùng vẽ vẫn nền tối — nét bản vẽ là màu sáng trên nền tối (như AutoCAD) */
+  --cad-bg: #1e2532;
+  --cad-txt: #e6ecf6;
+  --cad-txt-dim: #b6c2d4;
+  --cad-line: rgba(255, 255, 255, .16);
+  --cad-glass: rgba(30, 37, 50, .82);
+  --radius: 8px;
+  --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Cascadia Mono", "Consolas", "SF Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--font);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* chặn bôi đen khi DRM bật */
+.drm-noselect, .drm-noselect * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.drm-noselect input, .drm-noselect textarea { -webkit-user-select: text; user-select: text; }
+
+button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* ---------- khung tổng ---------- */
+.app {
+  display: grid;
+  grid-template-rows: 52px 1fr 26px;
+  grid-template-columns: 1fr;
+  grid-template-areas: "top" "main" "status";
+  height: 100vh;
+}
+
+/* ---------- thanh trên ---------- */
+.topbar {
+  grid-area: top;
+  box-shadow: 0 1px 3px rgba(20, 30, 50, .06);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: .2px; }
+.brand svg { color: var(--acc); flex: none; }
+.brand small { display: block; font-weight: 400; font-size: 10.5px; color: var(--txt-faint); letter-spacing: .3px; }
+
+.doc-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.doc-chip b { font-weight: 600; }
+.doc-chip .sep { color: var(--txt-faint); }
+.doc-chip code { font-family: var(--mono); color: var(--acc); font-size: 11.5px; }
+
+.spacer { flex: 1; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--txt);
+  transition: background .13s, border-color .13s;
+}
+.btn:hover { background: #e3e9f3; border-color: #b3bfd2; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--acc); border-color: var(--acc); color: #fff; font-weight: 620; }
+.btn.primary:hover { background: #1f6fcc; }
+.btn.icon { width: 32px; padding: 0; justify-content: center; }
+.btn.ghost { background: transparent; }
+
+.user {
+  display: flex; align-items: center; gap: 8px;
+  padding-left: 12px; border-left: 1px solid var(--line);
+}
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: linear-gradient(135deg, #2a7fe0, #7c4ddb);
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 11px; color: #fff;
+}
+.user-meta b { display: block; font-size: 12px; font-weight: 600; line-height: 1.25; }
+.user-meta span { font-size: 10.5px; color: var(--txt-faint); }
+
+/* ---------- vùng vẽ ---------- */
+.main { grid-area: main; position: relative; overflow: hidden; background: var(--cad-bg); }
+#cad { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+
+.overlay {
+  position: absolute; pointer-events: none;
+  font-size: 11px; color: var(--cad-txt-dim);
+}
+.ov-tl { top: 12px; left: 14px; }
+.ov-tl .t { font-size: 13px; font-weight: 600; color: var(--cad-txt); }
+.ov-tl .s { margin-top: 2px; font-family: var(--mono); font-size: 10.5px; color: #97a5ba; }
+.ov-tr {
+  top: 12px; right: 14px; text-align: right;
+  padding: 7px 11px; background: var(--cad-glass);
+  border: 1px solid var(--cad-line); border-radius: 6px;
+  backdrop-filter: blur(3px);
+}
+.ov-tr .lbl { font-size: 9.5px; letter-spacing: .7px; text-transform: uppercase; color: #97a5ba; }
+.ov-tr .v { font-family: var(--mono); font-size: 11.5px; color: #4fd6a0; }
+.ov-br { bottom: 14px; right: 14px; font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+
+.toolbar {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--cad-glass);
+  border: 1px solid var(--cad-line); border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+.toolbar .btn { height: 30px; border: 0; background: transparent; color: var(--cad-txt); }
+.toolbar .btn:hover { background: rgba(255, 255, 255, .12); border-color: transparent; }
+.toolbar .div { width: 1px; background: var(--cad-line); margin: 4px 3px; }
+
+/* ---------- thanh trạng thái ---------- */
+.status {
+  grid-area: status;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  font-size: 10.5px; color: var(--txt-faint);
+}
+.status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.status b { color: var(--txt-dim); font-weight: 600; }
+#log-count { color: var(--warn); font-family: var(--mono); }
+
+/* ---------- modal xuất PDF ---------- */
+.modal-bg {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(24, 34, 52, .42);
+  backdrop-filter: blur(3px);
+  display: none; place-items: center;
+}
+.modal-bg.on { display: grid; }
+.modal {
+  width: 460px; max-width: calc(100vw - 32px);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(20, 30, 50, .22);
+}
+.modal h3 { margin: 0; padding: 16px 18px 12px; font-size: 15px; border-bottom: 1px solid var(--line-soft); }
+.modal h3 span { display: block; font-size: 11px; font-weight: 400; color: var(--txt-faint); margin-top: 3px; }
+.modal .body { padding: 14px 18px; }
+.modal .row { display: flex; gap: 8px; margin-bottom: 13px; }
+.modal .row > div { flex: 1; }
+.modal label.cap { display: block; font-size: 11px; color: var(--txt-dim); margin-bottom: 6px; }
+.seg { display: flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.seg button {
+  flex: 1; height: 28px; border: 0; background: transparent; border-radius: 5px;
+  color: var(--txt-dim); font-size: 12px;
+}
+.seg button.on { background: var(--acc); color: #fff; font-weight: 620; }
+.modal .foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; background: var(--panel-2); border-top: 1px solid var(--line-soft);
+}
+/* chính sách áp dụng cố định cho mọi bản xuất — không phải tuỳ chọn */
+.policy {
+  padding: 10px 12px; margin-bottom: 4px;
+  background: rgba(18, 153, 106, .09);
+  border: 1px solid rgba(18, 153, 106, .25);
+  border-left: 2px solid var(--ok);
+  border-radius: 6px;
+  font-size: 11.5px; line-height: 1.6; color: #1b6d51;
+}
+.policy b { color: var(--ok); font-weight: 650; }
+
+/* ---------- toast ---------- */
+#drm-toast {
+  position: fixed; top: 64px; left: 50%;
+  transform: translate(-50%, -14px);
+  z-index: 90;
+  max-width: 460px; padding: 10px 16px;
+  border-radius: 8px; font-size: 12.5px; font-weight: 500;
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s, transform .18s;
+  background: #fdf3e0; color: #8a5a10;
+  border: 1px solid rgba(192, 122, 18, .38);
+  box-shadow: 0 10px 30px rgba(20, 30, 50, .18);
+}
+#drm-toast.show { opacity: 1; transform: translate(-50%, 0); }
+#drm-toast.block { background: #fdeaea; color: #a3232a; border-color: rgba(209, 52, 56, .4); }
+#drm-toast.ok { background: #e4f6ee; color: #10684a; border-color: rgba(18, 153, 106, .4); }
+
+/* ---------- màn che / nhoè ---------- */
+#drm-shield {
+  position: fixed; inset: 0; z-index: 80;
+  display: none; place-items: center;
+  background: rgba(24, 30, 42, .95);
+  color: #eef2f8;
+}
+.drm-shielded #drm-shield { display: grid; }
+.drm-shielded .app { filter: blur(16px); pointer-events: none; }
+.drm-shield-box { text-align: center; max-width: 380px; padding: 24px; }
+.drm-shield-box svg { color: #f0a533; }
+.drm-shield-box h3 { margin: 12px 0 6px; font-size: 17px; }
+.drm-shield-box p { margin: 0; font-size: 12.5px; color: #b6c2d4; line-height: 1.6; }
+
+.drm-flash .app { filter: blur(22px) contrast(.4); transition: filter .05s; }
+
+/* ---------- CHẶN IN: nếu người dùng vẫn mở được hộp thoại In ---------- */
+@media print {
+  html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+  .app, #drm-toast, #drm-shield, .modal-bg { display: none !important; }
+  body::after {
+    content: "TAI LIEU KHONG DUOC PHEP IN\A\A Ban ve nay duoc phan phoi qua he thong kiem soat. Chuc nang in truc tiep tu trinh duyet da bi vo hieu hoa. De co ban in hop le, dung nut \201CXuat PDF co watermark\201D trong trinh xem \2014 ban PDF do gan dinh danh nguoi tai va ma tra vet.\A\A Moi hanh vi in trai phep deu duoc ghi nhat ky.";
+    white-space: pre-wrap;
+    display: block;
+    padding: 60px 70px;
+    font: 600 15px/1.9 Arial, sans-serif;
+    color: #a11;
+    border: 3px double #a11;
+    margin: 40px;
+    text-align: center;
+  }
+}
+
+/* ---------- mở file DWG / DXF ---------- */
+.doc-chip .fmt {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: .5px;
+  padding: 1px 6px; border-radius: 4px;
+  background: rgba(42, 127, 224, .12); color: var(--acc);
+  border: 1px solid rgba(42, 127, 224, .3);
+}
+
+#busy {
+  position: absolute; inset: 0; z-index: 5;
+  display: grid; place-items: center;
+  background: rgba(30, 37, 50, .85);
+  backdrop-filter: blur(2px);
+  font-size: 13px; color: var(--cad-txt-dim);
+}
+/* display:grid ở trên đè mất [hidden] mặc định của trình duyệt -> phải trả lại */
+#busy[hidden] { display: none; }
+
+/* vùng thả file — chỉ hiện khi đang kéo file vào */
+.dropzone {
+  position: absolute; inset: 14px; z-index: 6;
+  display: none; place-items: center;
+  border: 2px dashed rgba(120, 185, 255, .65);
+  border-radius: 12px;
+  background: rgba(120, 185, 255, .12);
+  pointer-events: none;
+}
+.main.drop .dropzone { display: grid; }
+.dropzone span {
+  padding: 10px 18px; border-radius: 8px;
+  background: rgba(30, 37, 50, .9);
+  font-size: 13px; font-weight: 600; color: #7cbaff;
+}

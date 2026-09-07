@@ -1,0 +1,2 @@
+version 0.7.10
+license GPL-3.0 (GNU LibreDWG, bien dich WebAssembly qua @mlightcad/libredwg-web)

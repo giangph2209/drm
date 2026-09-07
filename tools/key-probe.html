@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Đo sự kiện bàn phím — trình duyệt thật sự nhận được gì?</title>
+<style>
+  :root{--bg:#0b0e14;--panel:#121722;--panel2:#171d2b;--line:#232b3d;--txt:#dbe3f0;
+        --dim:#8b97ad;--faint:#5f6b80;--acc:#4a9eff;--ok:#35c48a;--warn:#f0a533;--bad:#e5484d;
+        --mono:"Cascadia Mono",Consolas,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.6 "Segoe UI",system-ui,sans-serif;padding:26px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--faint);font-size:13px;margin-bottom:22px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card h2{margin:0;padding:12px 15px;font-size:13px;font-weight:650;
+           border-bottom:1px solid var(--line);letter-spacing:.3px}
+  .card .body{padding:14px 15px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;
+     color:var(--faint);padding:7px 10px;border-bottom:1px solid var(--line)}
+  td{padding:9px 10px;border-bottom:1px solid #1b2231;vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  kbd{font-family:var(--mono);font-size:11.5px;background:var(--panel2);
+      border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:650}
+  .pill.wait{background:#1b2231;color:var(--faint)}
+  .pill.yes{background:rgba(53,196,138,.15);color:var(--ok)}
+  .pill.no{background:rgba(229,72,77,.15);color:#ff8b8f}
+  #log{font-family:var(--mono);font-size:12px;height:330px;overflow:auto;
+       background:#0d1119;border-radius:7px;padding:11px 13px}
+  #log div{padding:1px 0;white-space:pre;color:var(--dim)}
+  #log div.snap{color:var(--warn);font-weight:700}
+  #log div.blocked{color:var(--ok)}
+  #log .t{color:#3f4a5e}
+  .empty{color:var(--faint);font-style:italic}
+  .note{margin-top:16px;padding:12px 14px;border-radius:8px;font-size:12.5px;line-height:1.65;
+        background:rgba(240,165,51,.08);border:1px solid rgba(240,165,51,.22);
+        border-left:3px solid var(--warn);color:#d6c39c}
+  .note b{color:var(--warn)}
+  .note.v{background:rgba(74,158,255,.07);border-color:rgba(74,158,255,.22);
+          border-left-color:var(--acc);color:#a9c6ea}
+  .note.v b{color:var(--acc)}
+  button{font:inherit;color:inherit;cursor:pointer;background:var(--panel2);
+         border:1px solid var(--line);border-radius:7px;padding:7px 13px}
+  button:hover{background:#1e2534}
+  .clip{margin-top:10px;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+        background:#0d1119;border-radius:6px;padding:9px 11px;word-break:break-all;min-height:38px}
+  ol{padding-left:20px;margin:0}
+  ol li{margin-bottom:9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Trình duyệt thật sự nhận được gì khi bấm phím?</h1>
+  <div class="sub">Trang đo độc lập — không liên quan tới bản vẽ. Bấm các phím bên dưới và xem kết quả.</div>
+
+  <div class="grid">
+
+    <div class="card">
+      <h2>Bấm lần lượt các phím sau</h2>
+      <table>
+        <thead><tr><th>Phím</th><th>Trình duyệt nhận được</th><th>Chặn được?</th></tr></thead>
+        <tbody id="tests"></tbody>
+      </table>
+      <div class="body" style="border-top:1px solid var(--line)">
+        <button id="btn-clip">Đọc clipboard hiện tại</button>
+        <div class="clip" id="clip">— chưa đọc —</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Nhật ký sự kiện thô</h2>
+      <div class="body" style="padding:10px">
+        <div id="log"><div class="empty">Bấm một phím bất kỳ…</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note v">
+    <b>Cách đọc kết quả.</b> Với <kbd>Ctrl</kbd>+<kbd>P</kbd> và <kbd>F12</kbd>, cột giữa sẽ hiện
+    <b>keydown</b> — trang web nhận được sự kiện <i>trước khi</i> trình duyệt kịp làm gì, nên
+    <code>preventDefault()</code> chặn được, hộp thoại In không mở ra.
+    Với <kbd>PrtSc</kbd>, cột giữa sẽ hiện <b>chỉ keyup</b> hoặc <b>không nhận được gì</b> — và dù
+    có nhận được thì ảnh cũng đã nằm trong clipboard từ trước đó rồi. Đó là toàn bộ khác biệt.
+  </div>
+
+  <div class="note">
+    <b>Kiểm chứng cuối cùng.</b>
+    <ol style="margin-top:8px">
+      <li>Bấm <kbd>PrtSc</kbd> trên trang này, rồi bấm nút <b>"Đọc clipboard hiện tại"</b>.
+          Nếu ra dòng cảnh báo thì phần ghi đè clipboard có tác dụng — nhưng ảnh vẫn đã được chụp.</li>
+      <li>Bấm <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, quét một vùng, rồi mở Paint dán thử.
+          Ảnh sẽ ra bình thường — trang web không hề biết chuyện đó đã xảy ra.</li>
+      <li>So sánh với <kbd>Ctrl</kbd>+<kbd>P</kbd>: hộp thoại In <b>không</b> mở ra. Đó là phím mà
+          trang web thực sự chặn được.</li>
+    </ol>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var TESTS = [
+    { id: 'ctrlp',  label: 'Ctrl + P',           match: function (e) { return (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p'; }, block: true },
+    { id: 'f12',    label: 'F12',                match: function (e) { return e.key === 'F12'; },                                          block: true },
+    { id: 'ctrlu',  label: 'Ctrl + U',           match: function (e) { return (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u'; },  block: true },
+    { id: 'snap',   label: 'PrtSc (Print Screen)', match: function (e) { return e.key === 'PrintScreen' || e.code === 'PrintScreen'; },    block: true, snap: true },
+    { id: 'winshs', label: 'Win + Shift + S',    match: function (e) { return e.shiftKey && (e.metaKey || e.key === 'Meta') && e.key.toLowerCase() === 's'; }, block: false, snap: true }
+  ];
+
+  var tbody = document.getElementById('tests');
+  var state = {};
+  TESTS.forEach(function (t) {
+    state[t.id] = { down: false, up: false };
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td><kbd>' + t.label + '</kbd></td>' +
+      '<td id="r-' + t.id + '"><span class="pill wait">chưa bấm</span></td>' +
+      '<td id="b-' + t.id + '"><span class="pill wait">—</span></td>';
+    tbody.appendChild(tr);
+  });
+
+  function paint(t) {
+    var s = state[t.id];
+    var got = [];
+    if (s.down) got.push('keydown');
+    if (s.up) got.push('keyup');
+    var cell = document.getElementById('r-' + t.id);
+    var bcell = document.getElementById('b-' + t.id);
+    if (!got.length) return;
+    cell.innerHTML = '<span class="pill ' + (s.down ? 'yes' : 'no') + '">' + got.join(' + ') + '</span>';
+    if (s.down) {
+      bcell.innerHTML = '<span class="pill yes">' + (t.snap ? 'phím chặn được — nhưng ảnh đã chụp' : 'CÓ') + '</span>';
+    } else {
+      bcell.innerHTML = '<span class="pill no">KHÔNG — chỉ có keyup</span>';
+    }
+  }
+
+  var log = document.getElementById('log');
+  var first = true;
+  function push(txt, cls) {
+    if (first) { log.innerHTML = ''; first = false; }
+    var d = new Date();
+    var ts = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' +
+             ('0' + d.getSeconds()).slice(-2) + '.' + ('00' + d.getMilliseconds()).slice(-3);
+    var el = document.createElement('div');
+    if (cls) el.className = cls;
+    el.innerHTML = '<span class="t">' + ts + '</span>  ' + txt;
+    log.insertBefore(el, log.firstChild);
+    while (log.children.length > 220) log.removeChild(log.lastChild);
+  }
+
+  function describe(e) {
+    var mods = [];
+    if (e.ctrlKey) mods.push('Ctrl');
+    if (e.shiftKey) mods.push('Shift');
+    if (e.altKey) mods.push('Alt');
+    if (e.metaKey) mods.push('Meta');
+    return pad(e.type, 9) + ' key=' + pad(JSON.stringify(e.key), 16) +
+           ' code=' + pad(e.code || '?', 16) + ' which=' + pad(String(e.keyCode), 4) +
+           (mods.length ? ' [' + mods.join('+') + ']' : '');
+  }
+  function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s; }
+
+  function handle(e, isDown) {
+    var hit = null;
+    TESTS.forEach(function (t) {
+      if (t.match(e)) hit = t;
+    });
+    var cls = hit && hit.snap ? 'snap' : '';
+    var extra = '';
+    if (hit && hit.block && isDown) {
+      e.preventDefault();
+      e.stopPropagation();
+      extra = '   << đã preventDefault()';
+      cls = 'blocked';
+    }
+    push(describe(e) + extra, cls);
+    if (hit) {
+      if (isDown) state[hit.id].down = true; else state[hit.id].up = true;
+      paint(hit);
+      if (hit.snap) wipeClipboard();
+    }
+  }
+
+  document.addEventListener('keydown', function (e) { handle(e, true); }, true);
+  document.addEventListener('keyup', function (e) { handle(e, false); }, true);
+
+  var NOTE = '[Anh chup man hinh da bi ghi de luc ' + new Date().toLocaleTimeString('vi-VN') + ']';
+  function wipeClipboard() {
+    NOTE = '[Anh chup man hinh da bi ghi de luc ' + new Date().toLocaleTimeString('vi-VN') + ']';
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(NOTE).catch(function () { });
+      }
+    } catch (err) { }
+  }
+
+  document.getElementById('btn-clip').addEventListener('click', function () {
+    var box = document.getElementById('clip');
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      box.textContent = 'Trình duyệt không cho đọc clipboard ở ngữ cảnh này.';
+      return;
+    }
+    navigator.clipboard.readText().then(function (t) {
+      box.textContent = t
+        ? 'Nội dung text: "' + t + '"'
+        : 'Clipboard không chứa TEXT — nhiều khả năng đang chứa ẢNH (trình duyệt không đọc được ảnh từ clipboard bằng readText).';
+    }).catch(function (err) {
+      box.textContent = 'Không đọc được: ' + err.name + ' — ' +
+        'thường do trang chưa được cấp quyền clipboard hoặc mở bằng file://. ' +
+        'Hãy dán trực tiếp vào Paint để kiểm tra.';
+    });
+  });
+})();
+</script>
+</body>
+</html>
