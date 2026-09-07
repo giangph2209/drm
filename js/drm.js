@@ -26,7 +26,8 @@
     wipeLines: [],              // các dòng định danh in lên ảnh cảnh báo
     detectDevtools: true,
     onViolation: null,          // function(type, detail) — nơi cắm API ghi log audit
-    onDevtools: null            // function(open) — báo mở/đóng DevTools để ẩn/hiện bản vẽ
+    onDevtools: null,           // function(open) — báo mở/đóng DevTools để ẩn/hiện bản vẽ
+    onWipe: null                // function(ok) — báo mỗi lần phá clipboard THÀNH/BẠI
   };
 
   var doc = global.document;
@@ -185,6 +186,11 @@
     });
   }
 
+  /* Báo kết quả một lần phá clipboard. ok=false nghĩa là KHÔNG ghi được clipboard
+     (mất quyền / trình duyệt chặn) -> lớp chống chụp màn hình coi như đã CHẾT, app
+     cần ẩn bản vẽ ngay thay vì tưởng vẫn an toàn. */
+  function wipeReport(ok) { try { if (CFG.onWipe) CFG.onWipe(!!ok); } catch (e) { } }
+
   var selfCopy = false;   // cho phép execCommand('copy') của chính mình đi qua
   function wipeClipboard() {
     var note = '[' + (CFG.wipeNote || 'Anh chup bi vo hieu hoa boi he thong phan phoi ban ve') + ']';
@@ -195,7 +201,8 @@
           'image/png': img,
           'text/plain': new Blob([note], { type: 'text/plain' })
         })]);
-      }).catch(function () { wipeText(note); });
+      }).then(function () { wipeReport(true); })
+        .catch(function () { wipeText(note); });   // wipeText tự báo kết quả của nó
       return;
     }
     wipeText(note);
@@ -203,21 +210,26 @@
   function wipeText(note) {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(note).catch(function () { legacyWipe(note); });
+        navigator.clipboard.writeText(note)
+          .then(function () { wipeReport(true); })
+          .catch(function () { legacyWipe(note); });
       } else legacyWipe(note);
     } catch (e) { legacyWipe(note); }
   }
   function legacyWipe(note) {
+    var ok = false;
     try {
       var ta = doc.createElement('textarea');
       ta.value = note;
       ta.style.cssText = 'position:fixed;opacity:0;left:-9999px';
       doc.body.appendChild(ta); ta.select();
       selfCopy = true;
-      doc.execCommand('copy');
+      ok = doc.execCommand('copy');     // false nếu trình duyệt chặn
       selfCopy = false;
       doc.body.removeChild(ta);
-    } catch (e) { selfCopy = false; }
+    } catch (e) { selfCopy = false; ok = false; }
+    /* Đây là đường CUỐI: nếu cả nó cũng hỏng thì clipboard thực sự không ghi được. */
+    wipeReport(ok);
   }
 
   /* Quay lại trang sau khi rời đi = thời điểm duy nhất bắt được Snipping Tool /

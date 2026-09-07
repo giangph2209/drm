@@ -108,8 +108,9 @@
     viewer.applyLayout(currentLayout);
     viewer.fit();
     paintDocInfo();
-    /* Nếu DevTools đã mở sẵn lúc bản vẽ vừa tải: ẩn ngay, đừng để loé ra 1 khung hình. */
-    if (devtoolsOpen) viewer.setSuppressed(true);
+    /* Nếu DevTools đang mở HOẶC clipboard đã mất quyền lúc bản vẽ vừa tải: ẩn ngay,
+       đừng để loé ra một khung hình. */
+    applySuppress();
   }
 
   /* -- danh sách layout -- */
@@ -272,9 +273,40 @@
     /* DevTools mở -> ẩn bản vẽ (canvas không vẽ entity nào); đóng -> hiện lại. */
     onDevtools: function (open) {
       devtoolsOpen = open;
-      if (viewer) viewer.setSuppressed(open);
+      applySuppress();
+    },
+    /* Mỗi lần drm.js phá clipboard: ok=false nghĩa là mất quyền ghi clipboard ngay
+       lúc này -> lớp chống chụp đã chết -> ẩn bản vẽ, không tin cờ cũ nữa. */
+    onWipe: function (ok) {
+      setClipboardDown(!ok, ok ? '' : 'wipe-failed');
     }
   });
+
+  /* ---- Nguồn sự thật duy nhất cho "lớp bảo vệ còn sống hay không" ----
+     Không tin trạng thái đã cấp lúc trước; hễ phát hiện mất quyền clipboard (qua
+     onWipe thất bại HOẶC permission bị thu hồi) là ẩn bản vẽ + khoá tải ngay. */
+  var protectionDown = false;
+  function applySuppress() {
+    if (viewer) {
+      viewer.setSuppressed(devtoolsOpen || protectionDown,
+        protectionDown && !devtoolsOpen
+          ? 'Mất quyền Clipboard — lớp chống chụp màn hình đã ngừng. Cấp lại quyền để xem tiếp.'
+          : undefined);
+    }
+  }
+  function setClipboardDown(down, reason) {
+    down = !!down;
+    if (down === protectionDown) return;
+    protectionDown = down;
+    clipboardOK = !down;                 // khoá luôn nút Xuất PDF
+    applySuppress();
+    if (down) {
+      window.DRM.toast('Mất quyền Clipboard — lớp chống chụp màn hình đã ngừng, bản vẽ tạm ẩn.', 'block');
+      logViolation('clipboard-protection-down', reason || '');
+    } else {
+      window.DRM.toast('Đã khôi phục quyền Clipboard.', 'ok');
+    }
+  }
 
   function logViolation(type, detail) {
     violations.push({ t: new Date(), type: type, detail: detail });
@@ -463,23 +495,14 @@
     });
   }
 
-  /* Sau khi đã cấp quyền: nếu người dùng thu hồi giữa chừng thì che lại, không cho xem. */
-  var revokeShieldOn = false;
+  /* Sau khi đã cấp quyền: nếu người dùng thu hồi giữa chừng thì ẩn bản vẽ ngay.
+     Đây là đường PROACTIVE (Chromium): bắt được ngay khi đổi quyền, trước cả khi
+     người dùng kịp chụp. Trình duyệt không hỗ trợ query sẽ dựa vào onWipe thất bại. */
   function watchRevoke() {
     if (!navigator.permissions || !navigator.permissions.query) return;
     navigator.permissions.query({ name: 'clipboard-write' }).then(function (st) {
       st.onchange = function () {
-        if (st.state === 'denied' && !revokeShieldOn) {
-          revokeShieldOn = true;
-          clipboardOK = false;      // khoá luôn đường tải PDF
-          window.DRM.shield(true, 'Quyền Clipboard đã bị thu hồi. Lớp chống chụp màn hình ngừng hoạt động — ' +
-            'cấp lại quyền Clipboard cho trang để tiếp tục xem và tải bản vẽ.');
-          logViolation('clipboard-revoked', '');
-        } else if (st.state !== 'denied' && revokeShieldOn) {
-          revokeShieldOn = false;
-          clipboardOK = true;
-          window.DRM.shield(false);
-        }
+        setClipboardDown(st.state === 'denied', 'permission-revoked');
       };
     }).catch(function () { });
   }

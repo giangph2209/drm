@@ -117,9 +117,10 @@
 
   /* Bật/tắt chế độ ẩn bản vẽ. Vẽ lại ngay để canvas trống (khi bật) hoặc hiện lại
      (khi tắt). Mọi thao tác pan/zoom sau đó cũng chỉ vẽ màn trống khi còn bật. */
-  Viewer.prototype.setSuppressed = function (on) {
+  Viewer.prototype.setSuppressed = function (on, msg) {
     on = !!on;
-    if (this.suppressed === on) return;
+    this.suppressMsg = on ? (msg || null) : null;
+    if (this.suppressed === on) { if (on) this.render(); return; }
     this.suppressed = on;
     this.render();
   };
@@ -132,7 +133,8 @@
     ctx.fillText('Bản vẽ đã được ẩn', this.W / 2, this.H / 2 - 11);
     ctx.fillStyle = 'rgba(255,255,255,.45)';
     ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Phát hiện DevTools đang mở — đóng lại để xem tiếp.', this.W / 2, this.H / 2 + 12);
+    ctx.fillText(this.suppressMsg || 'Phát hiện DevTools đang mở — đóng lại để xem tiếp.',
+      this.W / 2, this.H / 2 + 12);
     ctx.restore();
   };
 
